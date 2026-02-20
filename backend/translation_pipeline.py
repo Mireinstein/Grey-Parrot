@@ -1,54 +1,55 @@
-import asyncio
 import numpy as np
 from datetime import datetime
 from services.deepgram_service import DeepgramService
-from services.claude_service import ClaudeService
-from services.elevenlabs_service import ElevenLabsService
 from config import Config
 
 
 class TranslationPipeline:
+    """
+    All three stages — STT, translation, and TTS — are handled exclusively
+    by Deepgram:
+
+      1. STT + Translation  →  Deepgram Listen API (nova-2, translate=True)
+      2. TTS               →  Deepgram Speak API  (Aura)
+    """
+
     def __init__(self):
         self.deepgram = DeepgramService(Config.DEEPGRAM_API_KEY)
-        self.claude = ClaudeService(Config.ANTHROPIC_API_KEY)
-        self.elevenlabs = ElevenLabsService(Config.ELEVENLABS_API_KEY)
 
     async def process(self, audio_data: np.ndarray, source_lang: str, target_lang: str):
         """
-        Full translation pipeline: audio in -> audio out.
-        Returns dict with original text, translation, and audio.
+        Full pipeline: PCM16 audio in → translated PCM16 audio out.
+
+        Returns a dict with original text, translation, audio array, and
+        per-stage latency, or None when the transcript is too short to process.
         """
         try:
-            # Step 1: Speech to Text
+            # Step 1 + 2: STT and translation in a single Deepgram Listen call
             start_time = datetime.now()
-            text = await self.deepgram.transcribe(audio_data, source_lang)
-            stt_latency = (datetime.now() - start_time).total_seconds() * 1000
+            result = await self.deepgram.transcribe_and_translate(audio_data, source_lang)
+            stt_translate_latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            if not text or len(text.strip()) < 3:
-                return None  # Skip empty/very short transcriptions
+            original_text = result['transcript']
+            translated_text = result['translation']
 
-            # Step 2: Translate
+            if not original_text or len(original_text.strip()) < 3:
+                return None  # Skip empty / noise-only audio
+
+            # Step 3: TTS via Deepgram Aura (synthesises the translated text)
             start_time = datetime.now()
-            translated_text = self.claude.translate(text, source_lang, target_lang)
-            llm_latency = (datetime.now() - start_time).total_seconds() * 1000
-
-            # Step 3: Text to Speech
-            start_time = datetime.now()
-            audio_bytes = self.elevenlabs.synthesize(translated_text, target_lang)
+            audio_bytes = self.deepgram.synthesize(translated_text)
             tts_latency = (datetime.now() - start_time).total_seconds() * 1000
 
-            # Convert bytes to numpy array
             audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
 
             return {
-                'original_text': text,
+                'original_text': original_text,
                 'translated_text': translated_text,
                 'audio': audio_array,
                 'latency': {
-                    'stt': stt_latency,
-                    'llm': llm_latency,
+                    'stt_translate': stt_translate_latency,
                     'tts': tts_latency,
-                    'total': stt_latency + llm_latency + tts_latency
+                    'total': stt_translate_latency + tts_latency
                 },
                 'timestamp': datetime.now().isoformat()
             }
