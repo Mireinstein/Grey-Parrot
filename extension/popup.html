@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Grey Parrot</title>
+    <link rel="stylesheet" href="styles/popup.css">
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <span class="logo">🦜</span>
+            <div>
+                <h1>Grey Parrot</h1>
+                <p>Real-Time Translation</p>
+            </div>
+        </div>
+
+        <div id="status" class="status inactive">Translation Inactive</div>
+
+        <div class="controls">
+            <label>Customer Language</label>
+            <select id="customerLang">
+                <option value="es" selected>Spanish</option>
+                <option value="en">English</option>
+                <option value="fr">French</option>
+            </select>
+
+            <label>Agent Language</label>
+            <select id="agentLang">
+                <option value="en" selected>English</option>
+                <option value="es">Spanish</option>
+                <option value="fr">French</option>
+            </select>
+
+            <button id="startBtn" class="btn-primary">Start Translation</button>
+            <button id="stopBtn" class="btn-secondary" disabled>Stop</button>
+        </div>
+
+        <div class="transcript-section">
+            <label>Live Transcript</label>
+            <div id="transcript" class="transcript">
+                No active session
+            </div>
+        </div>
+    </div>
+
+    <script src="popup.js"></script>
+</body>
+</html>

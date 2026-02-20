@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "Grey Parrot - Real-Time Translation",
+  "version": "1.0.0",
+  "description": "Real-time bidirectional translation for contact center calls",
+  "permissions": ["activeTab", "storage", "tabs"],
+  "host_permissions": ["*://*.awsapps.com/*", "http://localhost:8000/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.awsapps.com/connect/ccp-v2/*"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon-16.png",
+      "48": "icons/icon-48.png",
+      "128": "icons/icon-128.png"
+    }
+  },
+  "web_accessible_resources": [
+    {
+      "resources": ["inject.js"],
+      "matches": ["*://*/*"]
+    }
+  ]
+}
