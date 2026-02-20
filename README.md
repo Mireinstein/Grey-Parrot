@@ -4,13 +4,13 @@ Real-time bidirectional speech translation (Spanish ↔ English) for contact cen
 
 ## Quick Start
 
-### 1. Get API Keys
+### 1. Get API Key
 
 | Service | URL | Free Tier |
 |---------|-----|-----------|
 | Deepgram | https://console.deepgram.com/ | $200 credit |
-| Anthropic | https://console.anthropic.com/ | $5 credit |
-| ElevenLabs | https://elevenlabs.io/ | 10k characters |
+
+Deepgram handles all three pipeline stages — STT, translation, and TTS — so only one API key is needed.
 
 ### 2. Configure Backend
 
@@ -71,11 +71,10 @@ Browser (Amazon Connect CCP)
   └── background.js    WebSocket client to backend
 
 Backend (FastAPI)
-  └── main.py          WebSocket server
+  └── main.py                   WebSocket server
   └── translation_pipeline.py
-        └── Deepgram   Speech-to-Text
-        └── Claude     Translation
-        └── ElevenLabs Text-to-Speech
+        └── Deepgram Listen API  STT + Translation (nova-2, translate=True)
+        └── Deepgram Speak API   TTS (Aura)
 ```
 
 ## File Structure
@@ -99,9 +98,7 @@ grey-parrot/
 │   ├── requirements.txt
 │   ├── test_backend.py
 │   └── services/
-│       ├── deepgram_service.py
-│       ├── claude_service.py
-│       └── elevenlabs_service.py
+│       └── deepgram_service.py
 ├── .env.example
 └── README.md
 ```
@@ -111,7 +108,7 @@ grey-parrot/
 - [ ] Backend starts without errors
 - [ ] Health endpoint responds: `curl http://localhost:8000/health`
 - [ ] WebSocket accepts connections
-- [ ] Pipeline processes audio through STT → LLM → TTS
+- [ ] Pipeline processes audio through Deepgram STT + translate → Deepgram TTS
 - [ ] Total latency < 2 seconds
 - [ ] Extension loads in Chrome without errors
 - [ ] Popup opens and displays UI
