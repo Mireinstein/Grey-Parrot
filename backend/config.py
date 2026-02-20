@@ -6,8 +6,6 @@ load_dotenv()
 class Config:
     # API Keys
     DEEPGRAM_API_KEY = os.getenv('DEEPGRAM_API_KEY')
-    ANTHROPIC_API_KEY = os.getenv('ANTHROPIC_API_KEY')
-    ELEVENLABS_API_KEY = os.getenv('ELEVENLABS_API_KEY')
 
     # Audio Settings
     SAMPLE_RATE = 16000
