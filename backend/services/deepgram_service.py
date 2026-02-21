@@ -1,7 +1,8 @@
 import io
 import wave
 import numpy as np
-from deepgram import DeepgramClient, PrerecordedOptions, SpeakOptions
+import httpx
+from deepgram import DeepgramClient, SpeakOptions
 
 
 # Deepgram Aura TTS voice — English only (Aura does not yet ship Spanish voices).
@@ -35,6 +36,7 @@ class DeepgramService:
     """
 
     def __init__(self, api_key: str):
+        self.api_key = api_key
         self.client = DeepgramClient(api_key)
 
     # ------------------------------------------------------------------ #
@@ -59,25 +61,30 @@ class DeepgramService:
         wav_bytes = _numpy_to_wav_bytes(audio_data)
         should_translate = source_lang != 'en'
 
-        options = PrerecordedOptions(
-            model='nova-2',
-            language=source_lang,
-            punctuate=True,
-            translate=should_translate,
-        )
+        params = {'model': 'nova-2', 'language': source_lang, 'punctuate': 'true'}
+        if should_translate:
+            params['translate'] = 'true'
 
-        response = await self.client.listen.asyncprerecorded.v('1').transcribe_file(
-            {'buffer': wav_bytes, 'mimetype': 'audio/wav'},
-            options,
-        )
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                'https://api.deepgram.com/v1/listen',
+                headers={
+                    'Authorization': f'Token {self.api_key}',
+                    'Content-Type': 'audio/wav',
+                },
+                content=wav_bytes,
+                params=params,
+                timeout=30.0,
+            )
+            resp.raise_for_status()
+            data = resp.json()
 
-        alt = response.results.channels[0].alternatives[0]
-        original = alt.transcript.strip()
+        alt = data['results']['channels'][0]['alternatives'][0]
+        original = alt.get('transcript', '').strip()
 
-        if should_translate and hasattr(alt, 'translation') and alt.translation:
-            translated = alt.translation.transcript.strip()
-        else:
-            translated = original
+        # Deepgram returns translations as a list under 'translations'
+        translations = alt.get('translations') or []
+        translated = translations[0].get('transcript', '').strip() if translations else original
 
         return {'transcript': original, 'translation': translated}
 
