@@ -112,16 +112,20 @@
 
     <div id="status-text">
         <span class="status-dot" id="dot"></span>
-        <span id="status-label">Connecting...</span>
+        <span id="status-label">Click Connect to start</span>
     </div>
 
-    <div class="actions">
+    <div class="actions" id="connect-row">
+        <button id="connect-btn">Connect</button>
+    </div>
+
+    <div class="actions" id="call-row" style="display:none">
         <button id="answer-btn" disabled>Answer</button>
         <button id="hangup-btn" disabled>Hang Up</button>
     </div>
 
     <p class="hint">
-        Call your Twilio number from your phone.<br>
+        Click Connect, then call your Twilio number from your phone.<br>
         This browser will ring — click Answer to pick up.<br>
         The Grey Parrot extension will translate the call.
     </p>
@@ -130,6 +134,9 @@
 <script>
     const dot         = document.getElementById('dot');
     const statusLabel = document.getElementById('status-label');
+    const connectBtn  = document.getElementById('connect-btn');
+    const connectRow  = document.getElementById('connect-row');
+    const callRow     = document.getElementById('call-row');
     const answerBtn   = document.getElementById('answer-btn');
     const hangupBtn   = document.getElementById('hangup-btn');
 
@@ -140,19 +147,31 @@
         statusLabel.textContent = text;
     }
 
+    // init() must only be called from a user gesture so Chrome allows AudioContext
     async function init() {
+        connectBtn.disabled = true;
+        setStatus('', 'Connecting...');
         try {
-            const res   = await fetch('/token');
-            const data  = await res.json();
+            const res  = await fetch('/token');
+            const data = await res.json();
             device = new Twilio.Device(data.token, { codecPreferences: ['opus', 'pcmu'] });
 
-            device.on('ready',      () => setStatus('ready', 'Ready — waiting for calls'));
-            device.on('error',      (err) => setStatus('error', `Error: ${err.message}`));
+            device.on('ready', () => {
+                setStatus('ready', 'Ready — waiting for calls');
+                connectRow.style.display = 'none';
+                callRow.style.display    = 'flex';
+            });
+
+            device.on('error', (err) => {
+                setStatus('error', `Error: ${err.message}`);
+                connectBtn.disabled = false;
+            });
+
             device.on('disconnect', () => {
                 setStatus('ready', 'Call ended — waiting for calls');
                 answerBtn.disabled = true;
                 hangupBtn.disabled = true;
-                activeConnection = null;
+                activeConnection   = null;
             });
 
             device.on('incoming', (conn) => {
@@ -164,15 +183,19 @@
                     setStatus('ready', 'Call ended — waiting for calls');
                     answerBtn.disabled = true;
                     hangupBtn.disabled = true;
-                    activeConnection = null;
+                    activeConnection   = null;
                 });
             });
 
         } catch (err) {
-            setStatus('error', 'Failed to load — is the server running?');
+            setStatus('error', 'Failed — is the server running?');
+            connectBtn.disabled = false;
             console.error(err);
         }
     }
+
+    // user gesture → AudioContext allowed
+    connectBtn.addEventListener('click', init);
 
     answerBtn.addEventListener('click', () => {
         if (!activeConnection) return;
@@ -185,8 +208,6 @@
     hangupBtn.addEventListener('click', () => {
         if (activeConnection) activeConnection.disconnect();
     });
-
-    init();
 </script>
 </body>
 </html>
