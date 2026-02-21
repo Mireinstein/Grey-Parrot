@@ -24,20 +24,22 @@ from twilio.jwt.access_token import AccessToken
 from twilio.jwt.access_token.grants import VoiceGrant
 from twilio.twiml.voice_response import VoiceResponse, Dial
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # Load from the shared backend .env
-load_dotenv(dotenv_path=os.path.join(os.path.dirname(__file__), '..', 'backend', '.env'))
+load_dotenv(dotenv_path=os.path.join(BASE_DIR, '..', 'backend', '.env'))
 
 ACCOUNT_SID  = os.getenv('TWILIO_ACCOUNT_SID')
 API_KEY      = os.getenv('TWILIO_API_KEY')      # Twilio API Key SID
 API_SECRET   = os.getenv('TWILIO_API_SECRET')   # Twilio API Key Secret
 APP_SID      = os.getenv('TWILIO_APP_SID')      # TwiML App SID
 
-app = Flask(__name__, static_folder=os.path.dirname(__file__))
+app = Flask(__name__, static_folder=BASE_DIR)
 
 
 @app.route('/')
 def index():
-    return send_from_directory(os.path.dirname(__file__), 'index.html')
+    return send_from_directory(BASE_DIR, 'index.html')
 
 
 @app.route('/token')
