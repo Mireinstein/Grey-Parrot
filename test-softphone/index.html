@@ -152,6 +152,11 @@
         connectBtn.disabled = true;
         setStatus('', 'Connecting...');
         try {
+            // Enumerate devices first so Chrome populates device IDs —
+            // prevents Twilio's "Devices not found: default" warning
+            await navigator.mediaDevices.getUserMedia({ audio: true });
+            await navigator.mediaDevices.enumerateDevices();
+
             const res  = await fetch('/token');
             const data = await res.json();
             device = new Twilio.Device(data.token, { codecPreferences: ['opus', 'pcmu'] });
