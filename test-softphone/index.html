@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>Grey Parrot – Test Softphone</title>
-    <script src="https://sdk.twilio.com/js/client/releases/1.14.0/twilio.min.js"></script>
+    <script src="https://unpkg.com/@twilio/voice-sdk/dist/twilio.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -161,7 +161,8 @@
             const data = await res.json();
             device = new Twilio.Device(data.token, { codecPreferences: ['opus', 'pcmu'] });
 
-            device.on('ready', () => {
+            // v2 SDK: 'registered' replaces 'ready'
+            device.on('registered', () => {
                 setStatus('ready', 'Ready — waiting for calls');
                 connectRow.style.display = 'none';
                 callRow.style.display    = 'flex';
@@ -172,25 +173,23 @@
                 connectBtn.disabled = false;
             });
 
-            device.on('disconnect', () => {
-                setStatus('ready', 'Call ended — waiting for calls');
-                answerBtn.disabled = true;
-                hangupBtn.disabled = true;
-                activeConnection   = null;
-            });
-
-            device.on('incoming', (conn) => {
-                activeConnection = conn;
+            device.on('incoming', (call) => {
+                activeConnection = call;
                 setStatus('ringing', 'Incoming call...');
                 answerBtn.disabled = false;
 
-                conn.on('disconnect', () => {
+                const onCallEnd = () => {
                     setStatus('ready', 'Call ended — waiting for calls');
                     answerBtn.disabled = true;
                     hangupBtn.disabled = true;
                     activeConnection   = null;
-                });
+                };
+                call.on('disconnect', onCallEnd);
+                call.on('cancel', onCallEnd);
             });
+
+            // v2 SDK: must explicitly register to receive incoming calls
+            await device.register();
 
         } catch (err) {
             setStatus('error', 'Failed — is the server running?');
