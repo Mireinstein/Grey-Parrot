@@ -1,14 +1,15 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
-import json
 import numpy as np
-from translation_pipeline import TranslationPipeline
-from audio_processor import AudioProcessor
+from datetime import datetime
+from deep_translator import GoogleTranslator
+from services.deepgram_service import DeepgramService
+from services.deepgram_streamer import DeepgramStreamer
+from config import Config
 
 app = FastAPI(title="Grey Parrot Translation API")
 
-# CORS for browser extension
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -17,20 +18,23 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Active sessions
 sessions = {}
+
+
+def translate_text(text: str, source: str, target: str) -> str:
+    if source == target:
+        return text
+    return GoogleTranslator(source=source, target=target).translate(text)
 
 
 @app.websocket("/ws/translate")
 async def translate_websocket(websocket: WebSocket):
-    """Main WebSocket endpoint for real-time translation"""
     await websocket.accept()
     session_id = None
+    streamers = {}
 
     try:
-        # Initialize pipeline
-        pipeline = TranslationPipeline()
-        audio_processor = AudioProcessor()
+        tts = DeepgramService(Config.DEEPGRAM_API_KEY)
 
         while True:
             data = await websocket.receive_json()
@@ -39,99 +43,111 @@ async def translate_websocket(websocket: WebSocket):
                 session_id = data['sessionId']
                 customer_lang = data['customerLanguage']
                 agent_lang = data['agentLanguage']
+                transcript = []
 
                 sessions[session_id] = {
                     'customer_lang': customer_lang,
                     'agent_lang': agent_lang,
-                    'transcript': [],
-                    'processor': audio_processor
+                    'transcript': transcript,
                 }
+
+                # ── Customer → Agent ─────────────────────────────────────
+                # Agent reads the English translation; no TTS needed.
+                async def on_customer_utterance(text: str,
+                                                _cl=customer_lang, _al=agent_lang,
+                                                _tr=transcript):
+                    loop = asyncio.get_event_loop()
+                    translated = await loop.run_in_executor(
+                        None, lambda: translate_text(text, _cl, _al)
+                    )
+                    print(f"customer | {text!r} → {translated!r}")
+                    _tr.append({
+                        'speaker': 'customer',
+                        'text': text,
+                        'translation': translated,
+                        'timestamp': datetime.now().isoformat(),
+                    })
+                    await websocket.send_json({'type': 'TRANSCRIPT', 'transcript': _tr})
+
+                # ── Agent → Customer ─────────────────────────────────────
+                # Translate agent's English to customer language + TTS.
+                async def on_agent_utterance(text: str,
+                                             _cl=customer_lang, _al=agent_lang,
+                                             _tr=transcript):
+                    loop = asyncio.get_event_loop()
+                    translated = await loop.run_in_executor(
+                        None, lambda: translate_text(text, _al, _cl)
+                    )
+                    print(f"agent   | {text!r} → {translated!r}")
+
+                    if _al != _cl:
+                        audio_bytes = tts.synthesize(translated)
+                        audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+                        await websocket.send_json({
+                            'type': 'TRANSLATED_AUDIO',
+                            'direction': 'customer',
+                            'audioData': audio_array.tolist(),
+                        })
+
+                    _tr.append({
+                        'speaker': 'agent',
+                        'text': text,
+                        'translation': translated,
+                        'timestamp': datetime.now().isoformat(),
+                    })
+                    await websocket.send_json({'type': 'TRANSCRIPT', 'transcript': _tr})
+
+                # Lazy-connect: Deepgram WS opens on first audio chunk
+                streamers['customer'] = DeepgramStreamer(
+                    Config.DEEPGRAM_API_KEY, customer_lang, on_customer_utterance
+                )
+                streamers['agent'] = DeepgramStreamer(
+                    Config.DEEPGRAM_API_KEY, agent_lang, on_agent_utterance
+                )
 
                 await websocket.send_json({
                     'type': 'SESSION_STARTED',
-                    'sessionId': session_id
+                    'sessionId': session_id,
                 })
 
             elif data['type'] == 'AUDIO_CHUNK' and session_id in sessions:
-                session = sessions[session_id]
-                direction = data['direction']  # 'customer' or 'agent'
-                audio_array = np.array(data['audioData'], dtype=np.int16)
-
-                # Add to buffer
-                session['processor'].add_chunk(direction, audio_array)
-
-                # Check if ready to process
-                if session['processor'].is_ready(direction):
-                    buffered_audio = session['processor'].get_buffer(direction)
-
-                    # Determine source and target languages
-                    if direction == 'customer':
-                        source_lang = session['customer_lang']
-                        target_lang = session['agent_lang']
-                    else:
-                        source_lang = session['agent_lang']
-                        target_lang = session['customer_lang']
-
-                    # Customer→agent: text only (agent reads the translation, no TTS)
-                    # Agent→customer: full TTS so the translated audio can be played
-                    needs_tts = direction == 'agent'
-
-                    result = await pipeline.process(
-                        buffered_audio,
-                        source_lang,
-                        target_lang,
-                        synthesize=needs_tts
-                    )
-
-                    if result:
-                        # Only send audio for agent→customer direction
-                        if needs_tts and result['audio'] is not None:
-                            await websocket.send_json({
-                                'type': 'TRANSLATED_AUDIO',
-                                'direction': 'customer',
-                                'audioData': result['audio'].tolist(),
-                                'latency': result['latency']
-                            })
-
-                        # Update transcript
-                        session['transcript'].append({
-                            'speaker': direction,
-                            'text': result['original_text'],
-                            'translation': result['translated_text'],
-                            'timestamp': result['timestamp']
-                        })
-
-                        await websocket.send_json({
-                            'type': 'TRANSCRIPT',
-                            'transcript': session['transcript']
-                        })
-
-                    # Clear buffer
-                    session['processor'].clear_buffer(direction)
+                direction = data['direction']
+                if direction in streamers:
+                    audio_array = np.array(data['audioData'], dtype=np.int16)
+                    await streamers[direction].send(audio_array.tobytes())
 
             elif data['type'] == 'END_SESSION' and session_id in sessions:
                 del sessions[session_id]
+                for s in streamers.values():
+                    await s.finish()
+                streamers.clear()
                 await websocket.send_json({
                     'type': 'SESSION_ENDED',
-                    'sessionId': session_id
+                    'sessionId': session_id,
                 })
 
     except WebSocketDisconnect:
-        if session_id and session_id in sessions:
-            del sessions[session_id]
+        pass
     except Exception as e:
         print(f"WebSocket error: {e}")
+    finally:
+        if session_id and session_id in sessions:
+            del sessions[session_id]
+        for s in streamers.values():
+            try:
+                await s.finish()
+            except Exception:
+                pass
 
 
 @app.get("/health")
 def health():
     return {
         "status": "ok",
-        "active_sessions": len(sessions)
+        "active_sessions": len(sessions),
     }
 
 
 if __name__ == "__main__":
     import uvicorn
-    from config import Config
     uvicorn.run(app, host=Config.HOST, port=Config.PORT)
