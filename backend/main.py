@@ -72,21 +72,26 @@ async def translate_websocket(websocket: WebSocket):
                         source_lang = session['agent_lang']
                         target_lang = session['customer_lang']
 
-                    # Process through pipeline
+                    # Customer→agent: text only (agent reads the translation, no TTS)
+                    # Agent→customer: full TTS so the translated audio can be played
+                    needs_tts = direction == 'agent'
+
                     result = await pipeline.process(
                         buffered_audio,
                         source_lang,
-                        target_lang
+                        target_lang,
+                        synthesize=needs_tts
                     )
 
                     if result:
-                        # Send translated audio back
-                        await websocket.send_json({
-                            'type': 'TRANSLATED_AUDIO',
-                            'direction': 'agent' if direction == 'customer' else 'customer',
-                            'audioData': result['audio'].tolist(),
-                            'latency': result['latency']
-                        })
+                        # Only send audio for agent→customer direction
+                        if needs_tts and result['audio'] is not None:
+                            await websocket.send_json({
+                                'type': 'TRANSLATED_AUDIO',
+                                'direction': 'customer',
+                                'audioData': result['audio'].tolist(),
+                                'latency': result['latency']
+                            })
 
                         # Update transcript
                         session['transcript'].append({

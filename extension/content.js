@@ -9,11 +9,15 @@ window.addEventListener('message', (event) => {
     if (event.source !== window) return;
 
     if (event.data.type === 'AUDIO_CHUNK') {
-        chrome.runtime.sendMessage({
-            type: 'TRANSLATE_AUDIO',
-            direction: event.data.direction,
-            audioData: event.data.audioData
-        });
+        try {
+            chrome.runtime.sendMessage({
+                type: 'TRANSLATE_AUDIO',
+                direction: event.data.direction,
+                audioData: event.data.audioData
+            });
+        } catch (e) {
+            // Extension context invalidated — page refresh required
+        }
     }
 });
 

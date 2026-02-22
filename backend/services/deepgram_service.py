@@ -1,13 +1,14 @@
+import asyncio
 import io
 import wave
 import numpy as np
 import httpx
+from deep_translator import GoogleTranslator
 from deepgram import DeepgramClient, SpeakOptions
 
 
 # Deepgram Aura TTS voice — English only (Aura does not yet ship Spanish voices).
-# The pipeline translates non-English speech to English text via Deepgram's
-# translate parameter, then synthesises that English text with Aura.
+# STT is handled by nova-2; translation by Google Translate (deep_translator).
 VOICE = 'aura-asteria-en'
 
 
@@ -24,15 +25,9 @@ def _numpy_to_wav_bytes(audio_data: np.ndarray, sample_rate: int = 16000) -> byt
 
 class DeepgramService:
     """
-    Handles all three pipeline stages using Deepgram APIs only:
-
-      STT + Translation  →  Listen API (nova-2) with translate=True
-      TTS               →  Speak API  (Aura)
-
-    Translation note:
-      Deepgram's translate parameter converts non-English audio to an English
-      transcript in a single API call.  For English → target-language calls the
-      English transcript passes through unchanged and is synthesised directly.
+    STT  →  Deepgram Listen API (nova-2)
+    Translation  →  Google Translate via deep_translator (no API key required)
+    TTS  →  Deepgram Speak API (Aura)
     """
 
     def __init__(self, api_key: str):
@@ -40,30 +35,24 @@ class DeepgramService:
         self.client = DeepgramClient(api_key)
 
     # ------------------------------------------------------------------ #
-    #  STT + Translation (one Deepgram Listen API call)                   #
+    #  STT (Deepgram nova-2) + Translation (Google Translate)             #
     # ------------------------------------------------------------------ #
 
     async def transcribe_and_translate(
         self, audio_data: np.ndarray, source_lang: str
     ) -> dict:
         """
-        Transcribe audio and, when the source is non-English, return an
-        English translation alongside the original transcript — all in one
-        Deepgram Listen API call.
+        Transcribe audio with Deepgram nova-2, then translate to English
+        with Google Translate when the source is non-English.
 
         Returns:
             {
                 'transcript':  original-language text,
-                'translation': English text (equals transcript when
-                               source_lang == 'en'),
+                'translation': English text (equals transcript when source_lang == 'en'),
             }
         """
         wav_bytes = _numpy_to_wav_bytes(audio_data)
-        should_translate = source_lang != 'en'
-
         params = {'model': 'nova-2', 'language': source_lang, 'punctuate': 'true'}
-        if should_translate:
-            params['translate'] = 'true'
 
         async with httpx.AsyncClient() as client:
             resp = await client.post(
@@ -82,9 +71,14 @@ class DeepgramService:
         alt = data['results']['channels'][0]['alternatives'][0]
         original = alt.get('transcript', '').strip()
 
-        # Deepgram returns translations as a list under 'translations'
-        translations = alt.get('translations') or []
-        translated = translations[0].get('transcript', '').strip() if translations else original
+        if source_lang != 'en' and original:
+            loop = asyncio.get_event_loop()
+            translated = await loop.run_in_executor(
+                None,
+                lambda: GoogleTranslator(source=source_lang, target='en').translate(original)
+            )
+        else:
+            translated = original
 
         return {'transcript': original, 'translation': translated}
 

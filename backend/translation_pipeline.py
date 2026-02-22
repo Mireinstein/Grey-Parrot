@@ -16,15 +16,16 @@ class TranslationPipeline:
     def __init__(self):
         self.deepgram = DeepgramService(Config.DEEPGRAM_API_KEY)
 
-    async def process(self, audio_data: np.ndarray, source_lang: str, target_lang: str):
+    async def process(self, audio_data: np.ndarray, source_lang: str, target_lang: str, synthesize: bool = True):
         """
-        Full pipeline: PCM16 audio in → translated PCM16 audio out.
+        STT + translation pipeline. When synthesize=False, skips TTS and
+        returns only the text (used for customer→agent where the agent reads
+        the translation rather than hearing it).
 
-        Returns a dict with original text, translation, audio array, and
-        per-stage latency, or None when the transcript is too short to process.
+        Returns a dict with original text, translation, optional audio array,
+        and per-stage latency, or None when the transcript is too short.
         """
         try:
-            # Step 1 + 2: STT and translation in a single Deepgram Listen call
             start_time = datetime.now()
             result = await self.deepgram.transcribe_and_translate(audio_data, source_lang)
             stt_translate_latency = (datetime.now() - start_time).total_seconds() * 1000
@@ -35,12 +36,16 @@ class TranslationPipeline:
             if not original_text or len(original_text.strip()) < 3:
                 return None  # Skip empty / noise-only audio
 
-            # Step 3: TTS via Deepgram Aura (synthesises the translated text)
-            start_time = datetime.now()
-            audio_bytes = self.deepgram.synthesize(translated_text)
-            tts_latency = (datetime.now() - start_time).total_seconds() * 1000
+            print(f"src={source_lang}→{target_lang} | original: {original_text!r} | translated: {translated_text!r}")
 
-            audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
+            audio_array = None
+            tts_latency = 0
+
+            if synthesize:
+                start_time = datetime.now()
+                audio_bytes = self.deepgram.synthesize(translated_text)
+                tts_latency = (datetime.now() - start_time).total_seconds() * 1000
+                audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
 
             return {
                 'original_text': original_text,

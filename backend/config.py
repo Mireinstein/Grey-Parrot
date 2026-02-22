@@ -10,7 +10,7 @@ class Config:
     # Audio Settings
     SAMPLE_RATE = 16000
     CHUNK_SIZE = 4096
-    BUFFER_DURATION_MS = 500  # Process every 500ms
+    BUFFER_DURATION_MS = 2500  # Process every 2.5s for more complete sentences
 
     # Server Settings
     HOST = '0.0.0.0'

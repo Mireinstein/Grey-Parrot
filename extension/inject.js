@@ -4,12 +4,14 @@ console.log('Grey Parrot: Inject script loaded');
 let audioContext = null;
 let processors = {};
 let isTranslating = false;
+let pendingStreams = { agent: null, customer: null };
 
 // Hook getUserMedia (agent's microphone)
 const originalGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
 navigator.mediaDevices.getUserMedia = async function(...args) {
     const stream = await originalGetUserMedia(...args);
 
+    pendingStreams.agent = stream;
     if (isTranslating) {
         captureAudioStream(stream, 'agent');
     }
@@ -23,8 +25,11 @@ window.RTCPeerConnection = function(...args) {
     const pc = new originalRTCPeerConnection(...args);
 
     pc.addEventListener('track', (event) => {
-        if (event.track.kind === 'audio' && isTranslating) {
-            captureAudioStream(event.streams[0], 'customer');
+        if (event.track.kind === 'audio') {
+            pendingStreams.customer = event.streams[0];
+            if (isTranslating) {
+                captureAudioStream(event.streams[0], 'customer');
+            }
         }
     });
 
@@ -72,6 +77,14 @@ window.addEventListener('message', (event) => {
     if (event.data.type === 'START_TRANSLATION') {
         isTranslating = true;
         console.log('Grey Parrot: Translation started');
+
+        // Capture streams that arrived before translation started
+        if (pendingStreams.agent && !processors.agent) {
+            captureAudioStream(pendingStreams.agent, 'agent');
+        }
+        if (pendingStreams.customer && !processors.customer) {
+            captureAudioStream(pendingStreams.customer, 'customer');
+        }
     }
 
     if (event.data.type === 'STOP_TRANSLATION') {
