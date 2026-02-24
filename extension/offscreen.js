@@ -1,8 +1,9 @@
 // Offscreen document — runs as a real extension page so getUserMedia with
 // chromeMediaSource:'tab' works without CSP or context restrictions.
 
-let audioCtx  = null;
-let processor = null;
+let audioCtx   = null;
+let processor  = null;
+let audioElem  = null;   // plays stream back so the agent can still hear the customer
 
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'CAPTURE_CUSTOMER_AUDIO') {
@@ -33,6 +34,12 @@ async function captureAudio(streamId) {
             },
             video: false,
         });
+
+        // Play the captured stream back through the agent's speakers so they
+        // can still hear the customer while we also capture it for transcription.
+        audioElem = new Audio();
+        audioElem.srcObject = stream;
+        audioElem.play();
 
         audioCtx = new AudioContext({ sampleRate: 16000 });
         const source = audioCtx.createMediaStreamSource(stream);
@@ -71,6 +78,7 @@ async function captureAudio(streamId) {
 }
 
 function cleanup() {
+    if (audioElem) { audioElem.pause(); audioElem.srcObject = null; audioElem = null; }
     if (processor) { processor.disconnect(); processor = null; }
     if (audioCtx)  { audioCtx.close();       audioCtx  = null; }
 }
