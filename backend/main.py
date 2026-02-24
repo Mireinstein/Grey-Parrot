@@ -1,10 +1,9 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from starlette.websockets import WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
-import numpy as np
 from datetime import datetime
 from deep_translator import GoogleTranslator
-from services.deepgram_service import DeepgramService
 from services.deepgram_streamer import DeepgramStreamer
 from config import Config
 
@@ -34,8 +33,6 @@ async def translate_websocket(websocket: WebSocket):
     streamers = {}
 
     try:
-        tts = DeepgramService(Config.DEEPGRAM_API_KEY)
-
         while True:
             data = await websocket.receive_json()
 
@@ -80,15 +77,6 @@ async def translate_websocket(websocket: WebSocket):
                     )
                     print(f"agent   | {text!r} → {translated!r}")
 
-                    if _al != _cl:
-                        audio_bytes = tts.synthesize(translated)
-                        audio_array = np.frombuffer(audio_bytes, dtype=np.int16)
-                        await websocket.send_json({
-                            'type': 'TRANSLATED_AUDIO',
-                            'direction': 'customer',
-                            'audioData': audio_array.tolist(),
-                        })
-
                     _tr.append({
                         'speaker': 'agent',
                         'text': text,
@@ -113,23 +101,28 @@ async def translate_websocket(websocket: WebSocket):
             elif data['type'] == 'AUDIO_CHUNK' and session_id in sessions:
                 direction = data['direction']
                 if direction in streamers:
-                    audio_array = np.array(data['audioData'], dtype=np.int16)
-                    await streamers[direction].send(audio_array.tobytes())
+                    import array as _array
+                    pcm_bytes = _array.array('h', data['audioData']).tobytes()
+                    await streamers[direction].send(pcm_bytes)
 
             elif data['type'] == 'END_SESSION' and session_id in sessions:
                 del sessions[session_id]
                 for s in streamers.values():
                     await s.finish()
                 streamers.clear()
-                await websocket.send_json({
-                    'type': 'SESSION_ENDED',
-                    'sessionId': session_id,
-                })
+                # Client may have already closed the socket — send only if still open
+                if websocket.client_state == WebSocketState.CONNECTED:
+                    await websocket.send_json({
+                        'type': 'SESSION_ENDED',
+                        'sessionId': session_id,
+                    })
 
-    except WebSocketDisconnect:
-        pass
+    except (WebSocketDisconnect, RuntimeError):
+        pass  # normal client disconnect
     except Exception as e:
+        import traceback
         print(f"WebSocket error: {e}")
+        traceback.print_exc()
     finally:
         if session_id and session_id in sessions:
             del sessions[session_id]

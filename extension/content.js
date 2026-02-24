@@ -1,10 +1,17 @@
-// Inject script into page context so it can access WebRTC APIs
+// ── 1. Inject inject.js into page context so it can access WebRTC ──
+// Pass the worklet URL before inject.js loads so it can use it without
+// needing chrome.runtime (which is unavailable in page context).
+window.__gpWorkletUrl = chrome.runtime.getURL('pcm-processor.js');
+
 const script = document.createElement('script');
 script.src = chrome.runtime.getURL('inject.js');
 (document.head || document.documentElement).appendChild(script);
 script.onload = () => script.remove();
 
-// Forward audio chunks from page to background service worker
+// ── 2. Sidebar state ──────────────────────────────────────────────
+let sidebarHost = null;
+
+// ── 3. Forward audio chunks from page → background ────────────────
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
 
@@ -21,20 +28,425 @@ window.addEventListener('message', (event) => {
     }
 });
 
-// Listen for translated audio from background and pass to inject.js
-chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'TRANSLATED_AUDIO') {
-        window.postMessage({
-            type: 'INJECT_AUDIO',
-            audioData: message.audioData
-        }, '*');
+// ── 4. Storage listener — update transcript in sidebar ────────────
+chrome.storage.onChanged.addListener((changes) => {
+    if (changes.transcript && sidebarHost) {
+        const shadow = sidebarHost.shadowRoot;
+        if (shadow) displayTranscript(shadow, changes.transcript.newValue);
     }
+});
 
+// ── 5. Messages from background ───────────────────────────────────
+chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'START_TRANSLATION') {
         window.postMessage({ type: 'START_TRANSLATION' }, '*');
     }
-
     if (message.type === 'STOP_TRANSLATION') {
         window.postMessage({ type: 'STOP_TRANSLATION' }, '*');
     }
+    if (message.type === 'TOGGLE_SIDEBAR') {
+        toggleSidebar();
+    }
 });
+
+// ── 6. Sidebar HTML / CSS (injected into Shadow DOM) ─────────────
+const SIDEBAR_TEMPLATE = `
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  #wrapper {
+    display: flex;
+    height: 100%;
+    width: 100%;
+  }
+
+  /* Drag-to-resize handle on the left edge */
+  #resize-handle {
+    width: 5px;
+    flex-shrink: 0;
+    cursor: ew-resize;
+    background: transparent;
+    transition: background 0.15s;
+    position: relative;
+    z-index: 1;
+  }
+  #resize-handle:hover,
+  #resize-handle.dragging {
+    background: #4a90e2;
+  }
+
+  /* Main panel */
+  #sidebar {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    background: #f4f5f7;
+    box-shadow: -6px 0 28px rgba(0, 0, 0, 0.18);
+    overflow: hidden;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    color: #2d2d2d;
+    font-size: 13px;
+  }
+
+  /* ── Header ── */
+  .gp-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 13px 14px;
+    background: #16213e;
+    color: #fff;
+    flex-shrink: 0;
+    user-select: none;
+  }
+  .gp-logo { font-size: 22px; line-height: 1; }
+  .gp-title { flex: 1; min-width: 0; }
+  .gp-title h1 { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .gp-title p  { font-size: 10.5px; opacity: 0.6; margin-top: 1px; }
+  .gp-close {
+    background: none;
+    border: none;
+    color: #fff;
+    font-size: 17px;
+    cursor: pointer;
+    padding: 4px 7px;
+    border-radius: 5px;
+    opacity: 0.7;
+    line-height: 1;
+    transition: opacity 0.15s, background 0.15s;
+    flex-shrink: 0;
+  }
+  .gp-close:hover { opacity: 1; background: rgba(255,255,255,0.12); }
+
+  /* ── Body ── */
+  .gp-body {
+    flex: 1;
+    overflow-y: auto;
+    padding: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 13px;
+    min-height: 0;
+  }
+
+  /* ── Status pill ── */
+  .gp-status {
+    text-align: center;
+    padding: 6px 12px;
+    border-radius: 999px;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+  }
+  .gp-status.inactive { background: #e4e4e4; color: #777; }
+  .gp-status.active   {
+    background: #d4edda;
+    color: #1a6b2a;
+    animation: gp-pulse 2s ease-in-out infinite;
+  }
+  @keyframes gp-pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.65; } }
+
+  /* ── Controls ── */
+  .gp-controls { display: flex; flex-direction: column; gap: 7px; }
+
+  .gp-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #666;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+
+  .gp-select {
+    width: 100%;
+    padding: 7px 9px;
+    border: 1px solid #d0d0d0;
+    border-radius: 6px;
+    font-size: 13px;
+    background: #fff;
+    color: #2d2d2d;
+    cursor: pointer;
+    appearance: auto;
+  }
+  .gp-select:focus { outline: none; border-color: #4a90e2; }
+
+  .gp-btn {
+    width: 100%;
+    padding: 9px;
+    border: none;
+    border-radius: 6px;
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: background 0.15s, opacity 0.15s;
+    margin-top: 2px;
+  }
+  .gp-btn:disabled { opacity: 0.42; cursor: not-allowed; }
+
+  .gp-btn-start { background: #4a90e2; color: #fff; }
+  .gp-btn-start:hover:not(:disabled) { background: #357abd; }
+
+  .gp-btn-stop { background: #e0e0e0; color: #555; }
+  .gp-btn-stop:hover:not(:disabled) { background: #c9c9c9; }
+
+  /* ── Transcript ── */
+  .gp-transcript-section {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    flex: 1;
+    min-height: 0;
+  }
+
+  .gp-transcript {
+    background: #fff;
+    border: 1px solid #ddd;
+    border-radius: 6px;
+    padding: 10px;
+    flex: 1;
+    min-height: 120px;
+    overflow-y: auto;
+    font-size: 12.5px;
+    color: #555;
+    line-height: 1.55;
+  }
+
+  .gp-entry {
+    padding: 8px 0;
+    border-bottom: 1px solid #f0f0f0;
+  }
+  .gp-entry:last-child { border-bottom: none; }
+
+  .gp-speaker {
+    font-weight: 700;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    margin-bottom: 2px;
+  }
+  .gp-speaker.customer { color: #c0392b; }
+  .gp-speaker.agent    { color: #0070c1; }
+
+  .gp-row { margin-top: 3px; font-size: 12px; }
+  .gp-row-label {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    color: #999;
+    margin-bottom: 1px;
+  }
+  .gp-original-text  { color: #333; }
+  .gp-translated-text { color: #2874c7; font-style: italic; }
+</style>
+
+<div id="wrapper">
+  <div id="resize-handle" title="Drag to resize"></div>
+  <div id="sidebar">
+
+    <div class="gp-header">
+      <span class="gp-logo">🦜</span>
+      <div class="gp-title">
+        <h1>Grey Parrot</h1>
+        <p>Real-Time Translation</p>
+      </div>
+      <button class="gp-close" id="closeBtn" title="Close sidebar">&#x2715;</button>
+    </div>
+
+    <div class="gp-body">
+
+      <div id="gp-status" class="gp-status inactive">Translation Inactive</div>
+
+      <div class="gp-controls">
+        <span class="gp-label">Customer Language</span>
+        <select id="customerLang" class="gp-select">
+          <option value="es" selected>Spanish</option>
+          <option value="en">English</option>
+          <option value="fr">French</option>
+          <option value="pt">Portuguese</option>
+          <option value="de">German</option>
+          <option value="zh">Chinese</option>
+          <option value="ar">Arabic</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+          <option value="hi">Hindi</option>
+          <option value="ru">Russian</option>
+          <option value="it">Italian</option>
+        </select>
+
+        <span class="gp-label">Agent Language</span>
+        <select id="agentLang" class="gp-select">
+          <option value="en" selected>English</option>
+          <option value="es">Spanish</option>
+          <option value="fr">French</option>
+          <option value="pt">Portuguese</option>
+          <option value="de">German</option>
+          <option value="zh">Chinese</option>
+          <option value="ar">Arabic</option>
+          <option value="ja">Japanese</option>
+          <option value="ko">Korean</option>
+          <option value="hi">Hindi</option>
+          <option value="ru">Russian</option>
+          <option value="it">Italian</option>
+        </select>
+
+        <button id="startBtn" class="gp-btn gp-btn-start">&#9654;  Start Translation</button>
+        <button id="stopBtn"  class="gp-btn gp-btn-stop" disabled>&#9632;  Stop Translation</button>
+      </div>
+
+      <div class="gp-transcript-section">
+        <span class="gp-label">Live Transcript</span>
+        <div id="gp-transcript" class="gp-transcript">No active session</div>
+      </div>
+
+    </div>
+  </div>
+</div>
+`;
+
+// ── 7. Sidebar lifecycle ──────────────────────────────────────────
+
+function createSidebar() {
+    sidebarHost = document.createElement('div');
+    sidebarHost.id = 'grey-parrot-sidebar-host';
+
+    Object.assign(sidebarHost.style, {
+        position: 'fixed',
+        top:      '0',
+        right:    '0',
+        width:    '25vw',
+        minWidth: '280px',
+        height:   '100vh',
+        zIndex:   '2147483647',
+        display:  'flex',
+    });
+
+    const shadow = sidebarHost.attachShadow({ mode: 'open' });
+    shadow.innerHTML = SIDEBAR_TEMPLATE;
+
+    document.body.appendChild(sidebarHost);
+
+    wireSidebarControls(shadow);
+    wireResizeHandle(sidebarHost, shadow);
+
+    // Restore any transcript already in storage
+    chrome.storage.local.get(['transcript'], (result) => {
+        if (result.transcript && result.transcript.length > 0) {
+            displayTranscript(shadow, result.transcript);
+        }
+    });
+}
+
+function wireSidebarControls(shadow) {
+    const $ = (id) => shadow.getElementById(id);
+
+    $('closeBtn').addEventListener('click', hideSidebar);
+
+    $('startBtn').addEventListener('click', () => {
+        const customerLanguage = $('customerLang').value;
+        const agentLanguage    = $('agentLang').value;
+
+        chrome.runtime.sendMessage({ type: 'START_TRANSLATION', customerLanguage, agentLanguage });
+
+        $('gp-status').textContent = 'Translation Active';
+        $('gp-status').className   = 'gp-status active';
+        $('startBtn').disabled     = true;
+        $('stopBtn').disabled      = false;
+        $('gp-transcript').textContent = 'Listening\u2026';
+    });
+
+    $('stopBtn').addEventListener('click', () => {
+        chrome.runtime.sendMessage({ type: 'STOP_TRANSLATION' });
+
+        $('gp-status').textContent = 'Translation Inactive';
+        $('gp-status').className   = 'gp-status inactive';
+        $('startBtn').disabled     = false;
+        $('stopBtn').disabled      = true;
+    });
+}
+
+function wireResizeHandle(host, shadow) {
+    const handle = shadow.getElementById('resize-handle');
+    let dragging = false;
+    let startX, startWidth;
+
+    handle.addEventListener('mousedown', (e) => {
+        dragging   = true;
+        startX     = e.clientX;
+        startWidth = host.offsetWidth;
+        handle.classList.add('dragging');
+        e.preventDefault();
+    });
+
+    // Listeners on document so the mouse can travel outside the shadow DOM
+    document.addEventListener('mousemove', (e) => {
+        if (!dragging) return;
+        // Dragging left → sidebar gets wider; dragging right → narrower
+        const delta    = startX - e.clientX;
+        const newWidth = Math.max(280, Math.min(window.innerWidth * 0.6, startWidth + delta));
+        host.style.width = newWidth + 'px';
+        document.documentElement.style.marginRight = newWidth + 'px';
+    });
+
+    document.addEventListener('mouseup', () => {
+        if (dragging) {
+            dragging = false;
+            handle.classList.remove('dragging');
+        }
+    });
+}
+
+function displayTranscript(shadow, transcript) {
+    if (!transcript || transcript.length === 0) return;
+    const el = shadow.getElementById('gp-transcript');
+    if (!el) return;
+
+    el.innerHTML = transcript.map(entry => {
+        const isCustomer = entry.speaker === 'customer';
+        const spokeLbl   = isCustomer ? 'Customer said'  : 'Agent said';
+        const hearLbl    = isCustomer ? 'Agent reads'    : 'Customer hears';
+        return `
+        <div class="gp-entry">
+            <div class="gp-speaker ${entry.speaker}">${entry.speaker}</div>
+            <div class="gp-row">
+                <div class="gp-row-label">${spokeLbl}</div>
+                <div class="gp-original-text">${entry.text}</div>
+            </div>
+            <div class="gp-row">
+                <div class="gp-row-label">${hearLbl}</div>
+                <div class="gp-translated-text">${entry.translation}</div>
+            </div>
+        </div>`;
+    }).join('');
+
+    el.scrollTop = el.scrollHeight;
+}
+
+function showSidebar() {
+    if (!sidebarHost) {
+        createSidebar();
+    } else {
+        sidebarHost.style.display = 'flex';
+    }
+    document.documentElement.style.marginRight = sidebarHost.offsetWidth + 'px';
+}
+
+function hideSidebar() {
+    if (sidebarHost) sidebarHost.style.display = 'none';
+    document.documentElement.style.marginRight = '';
+}
+
+function toggleSidebar() {
+    if (!sidebarHost || sidebarHost.style.display === 'none') {
+        showSidebar();
+    } else {
+        hideSidebar();
+    }
+}
+
+// ── 8. Auto-open on page load ─────────────────────────────────────
+if (document.body) {
+    showSidebar();
+} else {
+    document.addEventListener('DOMContentLoaded', showSidebar);
+}

@@ -1,7 +1,7 @@
 let ws = null;
 let isActive = false;
 let sessionId = null;
-let activeTabId = null;  // track the CCP tab so we never message the wrong tab
+let activeTabId = null;
 
 // Send to the known CCP tab only; swallow the error if content script isn't ready
 function sendToTab(message) {
@@ -12,6 +12,15 @@ function sendToTab(message) {
         }
     });
 }
+
+// Toggle the sidebar when the extension icon is clicked (no popup configured)
+chrome.action.onClicked.addListener((tab) => {
+    chrome.tabs.sendMessage(tab.id, { type: 'TOGGLE_SIDEBAR' }, () => {
+        if (chrome.runtime.lastError) {
+            // Content script not injected on this page
+        }
+    });
+});
 
 function connectBackend(customerLanguage, agentLanguage) {
     ws = new WebSocket('ws://localhost:8000/ws/translate');
@@ -29,10 +38,6 @@ function connectBackend(customerLanguage, agentLanguage) {
     ws.onmessage = (event) => {
         const data = JSON.parse(event.data);
 
-        if (data.type === 'TRANSLATED_AUDIO') {
-            sendToTab({ type: 'TRANSLATED_AUDIO', audioData: data.audioData });
-        }
-
         if (data.type === 'TRANSCRIPT') {
             chrome.storage.local.set({ transcript: data.transcript });
         }
@@ -48,7 +53,6 @@ function connectBackend(customerLanguage, agentLanguage) {
 
     ws.onerror = (error) => console.error('Grey Parrot: WebSocket error', error);
 
-    // Only reconnect while a session is active
     ws.onclose = () => {
         if (isActive) {
             console.log('Grey Parrot: WebSocket closed, reconnecting in 2s...');
@@ -62,13 +66,19 @@ chrome.runtime.onMessage.addListener((message, sender) => {
         isActive = true;
         sessionId = 'session-' + Date.now();
 
-        // Remember which tab to talk to (the tab that sent the message via popup)
-        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-            if (tabs[0]) {
-                activeTabId = tabs[0].id;
-                sendToTab({ type: 'START_TRANSLATION' });
-            }
-        });
+        if (sender.tab) {
+            // Message came from content script (sidebar) — use that tab directly
+            activeTabId = sender.tab.id;
+            sendToTab({ type: 'START_TRANSLATION' });
+        } else {
+            // Fallback: query the active tab (e.g. if popup is still used)
+            chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                if (tabs[0]) {
+                    activeTabId = tabs[0].id;
+                    sendToTab({ type: 'START_TRANSLATION' });
+                }
+            });
+        }
 
         connectBackend(message.customerLanguage, message.agentLanguage);
     }
