@@ -99,7 +99,7 @@ const SIDEBAR_TEMPLATE = `
     flex-shrink: 0;
     user-select: none;
   }
-  .gp-logo { font-size: 22px; line-height: 1; }
+  .gp-logo { width: 22px; height: 22px; object-fit: contain; }
   .gp-title { flex: 1; min-width: 0; }
   .gp-title h1 { font-size: 14px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .gp-title p  { font-size: 10.5px; opacity: 0.6; margin-top: 1px; }
@@ -219,25 +219,13 @@ const SIDEBAR_TEMPLATE = `
 
   .gp-speaker {
     font-weight: 700;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.4px;
-    margin-bottom: 2px;
+    font-size: 12px;
+    margin-right: 4px;
   }
   .gp-speaker.customer { color: #c0392b; }
   .gp-speaker.agent    { color: #0070c1; }
 
-  .gp-row { margin-top: 3px; font-size: 12px; }
-  .gp-row-label {
-    font-size: 9.5px;
-    font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.3px;
-    color: #999;
-    margin-bottom: 1px;
-  }
-  .gp-original-text  { color: #333; }
-  .gp-translated-text { color: #2874c7; font-style: italic; }
+  .gp-original-text { color: #333; font-size: 12px; }
 </style>
 
 <div id="wrapper">
@@ -245,7 +233,7 @@ const SIDEBAR_TEMPLATE = `
   <div id="sidebar">
 
     <div class="gp-header">
-      <span class="gp-logo">🦜</span>
+      <img class="gp-logo" id="gp-logo-img" src="" alt="Grey Parrot">
       <div class="gp-title">
         <h1>Grey Parrot</h1>
         <p>Real-Time Translation</p>
@@ -326,6 +314,8 @@ function createSidebar() {
 
     document.body.appendChild(sidebarHost);
 
+    shadow.getElementById('gp-logo-img').src = chrome.runtime.getURL('icons/icon-48.png');
+
     wireSidebarControls(shadow);
     wireResizeHandle(sidebarHost, shadow);
 
@@ -403,19 +393,12 @@ function displayTranscript(shadow, transcript) {
 
     el.innerHTML = transcript.map(entry => {
         const isCustomer = entry.speaker === 'customer';
-        const spokeLbl   = isCustomer ? 'Customer said'  : 'Agent said';
-        const hearLbl    = isCustomer ? 'Agent reads'    : 'Customer hears';
+        const label      = isCustomer ? 'Customer' : 'Agent';
+        const displayText = isCustomer ? entry.translation : entry.text;
         return `
         <div class="gp-entry">
-            <div class="gp-speaker ${entry.speaker}">${entry.speaker}</div>
-            <div class="gp-row">
-                <div class="gp-row-label">${spokeLbl}</div>
-                <div class="gp-original-text">${entry.text}</div>
-            </div>
-            <div class="gp-row">
-                <div class="gp-row-label">${hearLbl}</div>
-                <div class="gp-translated-text">${entry.translation}</div>
-            </div>
+            <span class="gp-speaker ${entry.speaker}">${label}:</span>
+            <span class="gp-original-text">${displayText}</span>
         </div>`;
     }).join('');
 

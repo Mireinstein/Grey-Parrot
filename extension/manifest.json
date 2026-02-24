@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
-  "name": "Grey Parrot - Real-Time Translation",
+  "name": "Grey Parrot - Real-time bidirectional translation for contact centers",
   "version": "1.0.0",
-  "description": "Real-time bidirectional translation for contact center calls",
+  "description": "Real-time bidirectional translation for contact centers",
   "permissions": ["activeTab", "storage", "tabs"],
   "host_permissions": ["*://*.my.connect.aws/*", "http://localhost:8000/*"],
   "background": {
@@ -26,7 +26,7 @@
   },
   "web_accessible_resources": [
     {
-      "resources": ["inject.js", "pcm-processor.js"],
+      "resources": ["inject.js", "pcm-processor.js", "icons/icon-48.png"],
       "matches": ["*://*/*"]
     }
   ]
