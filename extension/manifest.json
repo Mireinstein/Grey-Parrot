@@ -3,7 +3,7 @@
   "name": "Grey Parrot - Real-time bidirectional translation for contact centers",
   "version": "1.0.0",
   "description": "Real-time bidirectional translation for contact centers",
-  "permissions": ["activeTab", "storage", "tabs"],
+  "permissions": ["activeTab", "storage", "tabs", "tabCapture", "offscreen"],
   "host_permissions": ["*://*.my.connect.aws/*", "http://localhost:8000/*"],
   "background": {
     "service_worker": "background.js"
@@ -11,10 +11,11 @@
   "content_scripts": [
     {
       "matches": [
-        "*://*.my.connect.aws/ccp-v2/*"
+        "*://*.my.connect.aws/*"
       ],
       "js": ["content.js"],
-      "run_at": "document_start"
+      "run_at": "document_start",
+      "all_frames": true
     }
   ],
   "action": {

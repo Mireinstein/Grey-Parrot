@@ -1,5 +1,4 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from starlette.websockets import WebSocketState
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 from datetime import datetime
@@ -49,7 +48,6 @@ async def translate_websocket(websocket: WebSocket):
                 }
 
                 # ── Customer → Agent ─────────────────────────────────────
-                # Agent reads the English translation; no TTS needed.
                 async def on_customer_utterance(text: str,
                                                 _cl=customer_lang, _al=agent_lang,
                                                 _tr=transcript):
@@ -67,7 +65,6 @@ async def translate_websocket(websocket: WebSocket):
                     await websocket.send_json({'type': 'TRANSCRIPT', 'transcript': _tr})
 
                 # ── Agent → Customer ─────────────────────────────────────
-                # Translate agent's English to customer language + TTS.
                 async def on_agent_utterance(text: str,
                                              _cl=customer_lang, _al=agent_lang,
                                              _tr=transcript):
@@ -110,12 +107,13 @@ async def translate_websocket(websocket: WebSocket):
                 for s in streamers.values():
                     await s.finish()
                 streamers.clear()
-                # Client may have already closed the socket — send only if still open
-                if websocket.client_state == WebSocketState.CONNECTED:
+                try:
                     await websocket.send_json({
                         'type': 'SESSION_ENDED',
                         'sessionId': session_id,
                     })
+                except Exception:
+                    pass  # client already closed the socket — that's fine
 
     except (WebSocketDisconnect, RuntimeError):
         pass  # normal client disconnect

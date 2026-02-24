@@ -1,6 +1,8 @@
+const isTopFrame = window === window.top;
+
 // ── 1. Inject inject.js into page context so it can access WebRTC ──
-// Pass the worklet URL before inject.js loads so it can use it without
-// needing chrome.runtime (which is unavailable in page context).
+// Runs in every frame so the RTCPeerConnection hook is applied regardless
+// of which frame Amazon Connect uses for the softphone WebRTC connection.
 window.__gpWorkletUrl = chrome.runtime.getURL('pcm-processor.js');
 
 const script = document.createElement('script');
@@ -8,10 +10,11 @@ script.src = chrome.runtime.getURL('inject.js');
 (document.head || document.documentElement).appendChild(script);
 script.onload = () => script.remove();
 
-// ── 2. Sidebar state ──────────────────────────────────────────────
+// ── 2. Sidebar state (top frame only) ────────────────────────────
 let sidebarHost = null;
 
 // ── 3. Forward audio chunks from page → background ────────────────
+// Runs in every frame — audio may originate from an iframe.
 window.addEventListener('message', (event) => {
     if (event.source !== window) return;
 
@@ -29,27 +32,52 @@ window.addEventListener('message', (event) => {
 });
 
 // ── 4. Storage listener — update transcript in sidebar ────────────
-chrome.storage.onChanged.addListener((changes) => {
-    if (changes.transcript && sidebarHost) {
-        const shadow = sidebarHost.shadowRoot;
-        if (shadow) displayTranscript(shadow, changes.transcript.newValue);
-    }
-});
+// Top frame only: iframes have no sidebar to update.
+if (isTopFrame) {
+    chrome.storage.onChanged.addListener((changes) => {
+        if (changes.transcript && sidebarHost) {
+            const shadow = sidebarHost.shadowRoot;
+            if (shadow) displayTranscript(shadow, changes.transcript.newValue);
+        }
+    });
+}
 
 // ── 5. Messages from background ───────────────────────────────────
 chrome.runtime.onMessage.addListener((message) => {
     if (message.type === 'START_TRANSLATION') {
+        // Tell inject.js to start capturing the agent mic
         window.postMessage({ type: 'START_TRANSLATION' }, '*');
+        // Update sidebar UI (translation was started via the toolbar icon)
+        if (isTopFrame && sidebarHost) {
+            const shadow = sidebarHost.shadowRoot;
+            if (shadow) {
+                shadow.getElementById('gp-status').textContent = 'Translation Active';
+                shadow.getElementById('gp-status').className   = 'gp-status active';
+                shadow.getElementById('startBtn').disabled     = true;
+                shadow.getElementById('stopBtn').disabled      = false;
+                shadow.getElementById('gp-transcript').textContent = 'Listening\u2026';
+            }
+        }
     }
     if (message.type === 'STOP_TRANSLATION') {
         window.postMessage({ type: 'STOP_TRANSLATION' }, '*');
+        // Update sidebar UI (translation stopped via toolbar icon or sidebar button)
+        if (isTopFrame && sidebarHost) {
+            const shadow = sidebarHost.shadowRoot;
+            if (shadow) {
+                shadow.getElementById('gp-status').textContent = 'Translation Inactive';
+                shadow.getElementById('gp-status').className   = 'gp-status inactive';
+                shadow.getElementById('startBtn').disabled     = false;
+                shadow.getElementById('stopBtn').disabled      = true;
+            }
+        }
     }
-    if (message.type === 'TOGGLE_SIDEBAR') {
+    if (message.type === 'TOGGLE_SIDEBAR' && isTopFrame) {
         toggleSidebar();
     }
 });
 
-// ── 6. Sidebar HTML / CSS (injected into Shadow DOM) ─────────────
+// ── 5. Sidebar HTML / CSS (injected into Shadow DOM) ─────────────
 const SIDEBAR_TEMPLATE = `
 <style>
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -292,7 +320,7 @@ const SIDEBAR_TEMPLATE = `
 </div>
 `;
 
-// ── 7. Sidebar lifecycle ──────────────────────────────────────────
+// ── 6. Sidebar lifecycle ──────────────────────────────────────────
 
 function createSidebar() {
     sidebarHost = document.createElement('div');
@@ -332,22 +360,26 @@ function wireSidebarControls(shadow) {
 
     $('closeBtn').addEventListener('click', hideSidebar);
 
+    // Save language prefs whenever they change so the icon-click handler can read them
+    const savePrefs = () => chrome.storage.local.set({
+        customerLanguage: $('customerLang').value,
+        agentLanguage:    $('agentLang').value,
+    });
+    $('customerLang').addEventListener('change', savePrefs);
+    $('agentLang').addEventListener('change', savePrefs);
+
+    // Start button: save prefs and prompt user to click the toolbar icon.
+    // tabCapture requires the extension to be "invoked" (toolbar icon click),
+    // so the actual start happens in chrome.action.onClicked in background.js.
     $('startBtn').addEventListener('click', () => {
-        const customerLanguage = $('customerLang').value;
-        const agentLanguage    = $('agentLang').value;
-
-        chrome.runtime.sendMessage({ type: 'START_TRANSLATION', customerLanguage, agentLanguage });
-
-        $('gp-status').textContent = 'Translation Active';
-        $('gp-status').className   = 'gp-status active';
+        savePrefs();
+        $('gp-status').textContent = 'Click the toolbar icon \u2B06 to activate';
+        $('gp-status').className   = 'gp-status inactive';
         $('startBtn').disabled     = true;
-        $('stopBtn').disabled      = false;
-        $('gp-transcript').textContent = 'Listening\u2026';
     });
 
     $('stopBtn').addEventListener('click', () => {
         chrome.runtime.sendMessage({ type: 'STOP_TRANSLATION' });
-
         $('gp-status').textContent = 'Translation Inactive';
         $('gp-status').className   = 'gp-status inactive';
         $('startBtn').disabled     = false;
@@ -427,9 +459,11 @@ function toggleSidebar() {
     }
 }
 
-// ── 8. Auto-open on page load ─────────────────────────────────────
-if (document.body) {
-    showSidebar();
-} else {
-    document.addEventListener('DOMContentLoaded', showSidebar);
+// ── 7. Auto-open on page load (top frame only) ───────────────────
+if (isTopFrame) {
+    if (document.body) {
+        showSidebar();
+    } else {
+        document.addEventListener('DOMContentLoaded', showSidebar);
+    }
 }

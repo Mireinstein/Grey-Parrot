@@ -6,7 +6,7 @@ let workletReady  = false;
 let useWorklet    = false;   // true once AudioWorkletNode confirmed working
 let processors    = {};
 let isTranslating = false;
-let pendingStreams = { agent: null, customer: null };
+let pendingStreams = { agent: null };
 
 // ── AudioContext + worklet setup ──────────────────────────────────
 // __gpWorkletUrl is set by content.js (chrome.runtime.getURL) before
@@ -52,24 +52,6 @@ navigator.mediaDevices.getUserMedia = async function(...args) {
     }
 
     return stream;
-};
-
-// ── Hook RTCPeerConnection (customer's audio) ─────────────────────
-const originalRTCPeerConnection = window.RTCPeerConnection;
-window.RTCPeerConnection = function(...args) {
-    const pc = new originalRTCPeerConnection(...args);
-
-    pc.addEventListener('track', async (event) => {
-        if (event.track.kind === 'audio') {
-            const stream = new MediaStream([event.track]);
-            pendingStreams.customer = stream;
-            if (isTranslating) {
-                await captureAudioStream(stream, 'customer');
-            }
-        }
-    });
-
-    return pc;
 };
 
 // ── Capture a stream ──────────────────────────────────────────────
@@ -132,12 +114,11 @@ window.addEventListener('message', async (event) => {
         isTranslating = true;
         console.log('Grey Parrot: Translation started');
 
+        // Agent mic — captured via getUserMedia hook
         if (pendingStreams.agent && !processors.agent) {
             await captureAudioStream(pendingStreams.agent, 'agent');
         }
-        if (pendingStreams.customer && !processors.customer) {
-            await captureAudioStream(pendingStreams.customer, 'customer');
-        }
+
     }
 
     if (event.data.type === 'STOP_TRANSLATION') {
