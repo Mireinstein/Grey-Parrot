@@ -1,130 +1,203 @@
 # Grey Parrot
 
-Real-time bidirectional speech translation (Spanish ↔ English) for contact center agents using browser-based softphones.
+Real-time bidirectional speech translation for contact center agents. Grey Parrot sits as a sidebar inside Amazon Connect's CCP, listens to both sides of the call, and shows the agent a live translated transcript — no headset splitters, no separate apps.
 
-## Quick Start
+**How it works:**
+- The customer speaks (e.g. Spanish) → Deepgram transcribes → Google Translate converts to English → agent reads it in the sidebar
+- The agent speaks (English) → Deepgram transcribes → agent sees their own words confirmed in the sidebar
 
-### 1. Get API Key
+---
 
-| Service | URL | Free Tier |
-|---------|-----|-----------|
-| Deepgram | https://console.deepgram.com/ | $200 credit |
+## Prerequisites
 
-Deepgram handles all three pipeline stages — STT, translation, and TTS — so only one API key is needed.
+- **Python 3.10+**
+- **Google Chrome**
+- **Amazon Connect instance** with an agent account (you'll use the CCP softphone at `https://<your-instance>.my.connect.aws/ccp-v2/`)
+- **Deepgram API key** — free $200 credit at [console.deepgram.com](https://console.deepgram.com/)
 
-### 2. Configure Backend
+---
+
+## Setup
+
+### 1. Clone the repo
 
 ```bash
-cd backend
-cp ../.env.example .env
-# Edit .env and add your API keys
+git clone https://github.com/Mireinstein/Grey-Parrot.git
+cd Grey-Parrot
 ```
 
-### 3. Install Backend Dependencies
+### 2. Configure environment
+
+```bash
+cp .env.example backend/.env
+```
+
+Edit `backend/.env` and set your Deepgram key:
+
+```
+DEEPGRAM_API_KEY=your_deepgram_key_here
+```
+
+### 3. Install backend dependencies
 
 ```bash
 cd backend
 pip install -r requirements.txt
 ```
 
-### 4. Start Backend
+### 4. Start the backend
 
 ```bash
 cd backend
 python main.py
 ```
 
-Server runs at `http://localhost:8000`. Verify with:
+The server starts on `http://localhost:8000`. Confirm it's running:
+
 ```bash
 curl http://localhost:8000/health
+# {"status":"ok","active_sessions":0}
 ```
 
-### 5. Test the Pipeline
+Leave this terminal open — the backend must stay running during calls.
 
-```bash
-cd backend
-python test_backend.py
-```
-
-### 6. Load Chrome Extension
+### 5. Load the Chrome extension
 
 1. Open Chrome and go to `chrome://extensions/`
-2. Enable **Developer mode** (top right toggle)
+2. Enable **Developer mode** (toggle in the top-right)
 3. Click **Load unpacked**
-4. Select the `extension/` folder
-5. The Grey Parrot icon appears in your toolbar
+4. Select the `extension/` folder from this repo
+5. The Grey Parrot icon appears in your Chrome toolbar
 
-### 7. Use the Extension
+---
 
-1. Navigate to your Amazon Connect CCP page
-2. Click the Grey Parrot icon
-3. Select customer and agent languages
-4. Click **Start Translation**
-5. Translation begins on the next call
+## Using Grey Parrot on a Call
+
+1. **Navigate to your Amazon Connect CCP**
+   `https://<your-instance>.my.connect.aws/ccp-v2/`
+   The Grey Parrot sidebar opens automatically on the right side of the page.
+
+2. **Select languages in the sidebar**
+   - *Customer Language* — the language the customer is calling in (e.g. Spanish)
+   - *Agent Language* — the language the agent speaks (e.g. English)
+
+3. **Click "Start Translation"**
+   The status pill turns green and shows *Translation Active*.
+
+4. **Accept a call in the CCP softphone**
+   As soon as audio flows, Grey Parrot begins transcribing both sides:
+   - **Customer:** shows the English translation of what the customer said
+   - **Agent:** shows a confirmation of what the agent said
+
+5. **End the session**
+   Click **Stop Translation** when the call ends. The transcript stays visible until the next session starts.
+
+> **Tip:** The sidebar can be resized by dragging the left edge. It can be hidden/shown by clicking the Grey Parrot toolbar icon.
+
+---
 
 ## Architecture
 
 ```
-Browser (Amazon Connect CCP)
-  └── inject.js        Captures WebRTC audio streams
-  └── content.js       Bridges page ↔ extension
-  └── background.js    WebSocket client to backend
+Amazon Connect CCP (browser tab)
+  ├── content.js        Content script — injects sidebar UI and bridges messages
+  ├── inject.js         Page-context script — hooks getUserMedia + RTCPeerConnection
+  │                     to capture raw 16 kHz PCM from both audio streams
+  └── pcm-processor.js  AudioWorklet — converts float32 samples to int16 PCM
 
-Backend (FastAPI)
-  └── main.py                   WebSocket server
-  └── translation_pipeline.py
-        └── Deepgram Listen API  STT + Translation (nova-2, translate=True)
-        └── Deepgram Speak API   TTS (Aura)
+Chrome Extension Background
+  └── background.js     Maintains WebSocket connection to backend;
+                        forwards audio chunks and receives transcript updates
+
+Backend (FastAPI + uvicorn)
+  └── main.py                  WebSocket server — orchestrates the pipeline
+  └── services/
+      └── deepgram_streamer.py Streams PCM to Deepgram Live API (nova-2 model)
+                               Fires callback on speech_final utterances
+  └── config.py                Reads .env (DEEPGRAM_API_KEY, host, port)
+
+Translation
+  └── deep-translator (GoogleTranslator) — free, no API key required
 ```
+
+**Data flow per utterance:**
+
+```
+Microphone / WebRTC track
+  → inject.js (AudioWorklet, 16 kHz int16 PCM)
+  → content.js (window.postMessage)
+  → background.js (chrome.runtime.sendMessage → WebSocket)
+  → backend main.py (AUDIO_CHUNK)
+  → DeepgramStreamer.send()
+  → Deepgram Live API (nova-2, speech_final)
+  → GoogleTranslator
+  → WebSocket TRANSCRIPT message
+  → background.js → chrome.storage.local
+  → content.js (storage.onChanged)
+  → sidebar displayTranscript()
+```
+
+---
 
 ## File Structure
 
 ```
-grey-parrot/
+Grey-Parrot/
 ├── extension/
-│   ├── manifest.json
-│   ├── background.js
-│   ├── content.js
-│   ├── inject.js
-│   ├── popup.html
-│   ├── popup.js
-│   ├── styles/popup.css
+│   ├── manifest.json       MV3 manifest — permissions, content script rules
+│   ├── background.js       Service worker — WebSocket client, message routing
+│   ├── content.js          Content script — sidebar UI (Shadow DOM), audio bridge
+│   ├── inject.js           Page-context script — WebRTC hooks, AudioWorklet
+│   ├── pcm-processor.js    AudioWorklet processor — float32 → int16 PCM
 │   └── icons/
+│       ├── icon-16.png
+│       ├── icon-48.png
+│       └── icon-128.png
 ├── backend/
-│   ├── main.py
-│   ├── translation_pipeline.py
-│   ├── audio_processor.py
-│   ├── config.py
+│   ├── main.py             FastAPI WebSocket server
+│   ├── config.py           Environment config
 │   ├── requirements.txt
-│   ├── test_backend.py
 │   └── services/
-│       └── deepgram_service.py
+│       └── deepgram_streamer.py  Deepgram Live streaming client
 ├── .env.example
 └── README.md
 ```
 
-## Success Criteria
-
-- [ ] Backend starts without errors
-- [ ] Health endpoint responds: `curl http://localhost:8000/health`
-- [ ] WebSocket accepts connections
-- [ ] Pipeline processes audio through Deepgram STT + translate → Deepgram TTS
-- [ ] Total latency < 2 seconds
-- [ ] Extension loads in Chrome without errors
-- [ ] Popup opens and displays UI
-- [ ] Audio captured and translated end-to-end
-
-## Adding Icons
-
-Generate icons at 16x16, 48x48, and 128x128 pixels and place them in `extension/icons/`:
-- `icon-16.png`
-- `icon-48.png`
-- `icon-128.png`
+---
 
 ## Supported Languages
 
-| Code | Language |
-|------|----------|
-| `es` | Spanish |
-| `en` | English |
-| `fr` | French |
+| Code | Language   |
+|------|------------|
+| `en` | English    |
+| `es` | Spanish    |
+| `fr` | French     |
+| `pt` | Portuguese |
+| `de` | German     |
+| `zh` | Chinese    |
+| `ar` | Arabic     |
+| `ja` | Japanese   |
+| `ko` | Korean     |
+| `hi` | Hindi      |
+| `ru` | Russian    |
+| `it` | Italian    |
+
+---
+
+## Troubleshooting
+
+**Sidebar doesn't open**
+- Make sure the extension is loaded and enabled in `chrome://extensions/`
+- The content script only runs on `*.my.connect.aws/ccp-v2/*` — confirm your CCP URL matches that pattern
+
+**"Translation Inactive" stays grey after clicking Start**
+- Check the backend is running: `curl http://localhost:8000/health`
+- Open Chrome DevTools on the CCP tab → Console — look for WebSocket errors from Grey Parrot
+
+**No transcript appears during a call**
+- Open the extension's background service worker console (`chrome://extensions/` → Grey Parrot → *Service Worker*) and check for errors
+- In the CCP tab console, look for `Grey Parrot: AudioWorkletNode active` or `falling back to ScriptProcessorNode` — either is fine
+- Confirm audio is flowing: the Deepgram streamer connects lazily on the first audio chunk, so silence will produce nothing
+
+**`DEEPGRAM_API_KEY` error on backend start**
+- Ensure `backend/.env` exists and contains a valid key (not the placeholder from `.env.example`)
