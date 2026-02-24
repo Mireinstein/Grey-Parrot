@@ -90,10 +90,6 @@ function connectBackend(customerLanguage, agentLanguage) {
             chrome.storage.local.set({ transcript: data.transcript });
         }
 
-        if (data.type === 'TTS_AUDIO') {
-            sendToTab({ type: 'TTS_AUDIO', audio: data.audio });
-        }
-
         if (data.type === 'SESSION_STARTED') {
             console.log('Grey Parrot: Session started', data.sessionId);
         }

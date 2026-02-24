@@ -72,9 +72,6 @@ chrome.runtime.onMessage.addListener((message) => {
             }
         }
     }
-    if (message.type === 'TTS_AUDIO') {
-        window.postMessage({ type: 'TTS_AUDIO', audio: message.audio }, '*');
-    }
     if (message.type === 'TOGGLE_SIDEBAR' && isTopFrame) {
         toggleSidebar();
     }
