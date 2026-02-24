@@ -1,12 +1,76 @@
 // Runs in page context - has access to WebRTC
 console.log('Grey Parrot: Inject script loaded');
 
+// ── Hook RTCPeerConnection so we can replace the mic track with TTS ──
+const _OriginalRTCPeerConnection = window.RTCPeerConnection;
+const _trackedPCs = new Set();
+class RTCPeerConnection extends _OriginalRTCPeerConnection {
+    constructor(...args) {
+        super(...args);
+        _trackedPCs.add(this);
+        this.addEventListener('connectionstatechange', () => {
+            if (this.connectionState === 'closed' || this.connectionState === 'failed') {
+                _trackedPCs.delete(this);
+            }
+        });
+    }
+}
+Object.defineProperty(RTCPeerConnection, 'name', { value: 'RTCPeerConnection' });
+window.RTCPeerConnection = RTCPeerConnection;
+
 let audioContext  = null;
 let workletReady  = false;
 let useWorklet    = false;   // true once AudioWorkletNode confirmed working
 let processors    = {};
 let isTranslating = false;
 let pendingStreams = { agent: null };
+
+// ── TTS injection state ───────────────────────────────────────────
+let ttsCtx         = null;   // AudioContext for TTS playback
+let ttsDest        = null;   // MediaStreamDestination → feeds WebRTC sender
+let ttsSender      = null;   // the RTCRtpSender whose track we replaced
+let originalTrack  = null;   // saved mic track, restored on stop
+
+async function startTTSInjection() {
+    ttsCtx = new AudioContext();
+    ttsDest = ttsCtx.createMediaStreamDestination();
+
+    for (const pc of _trackedPCs) {
+        const audioSender = pc.getSenders().find(s => s.track && s.track.kind === 'audio');
+        if (audioSender) {
+            originalTrack = audioSender.track;
+            ttsSender     = audioSender;
+            await audioSender.replaceTrack(ttsDest.stream.getAudioTracks()[0]);
+            console.log('Grey Parrot: WebRTC mic replaced with TTS stream');
+            break;
+        }
+    }
+}
+
+async function stopTTSInjection() {
+    if (ttsSender && originalTrack) {
+        await ttsSender.replaceTrack(originalTrack);
+    }
+    ttsSender = null; originalTrack = null;
+    if (ttsCtx) { await ttsCtx.close(); ttsCtx = null; }
+    ttsDest = null;
+}
+
+async function playTTSChunk(base64Mp3) {
+    if (!ttsCtx || !ttsDest) return;
+    const binary = atob(base64Mp3);
+    const bytes  = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    try {
+        const buf = await ttsCtx.decodeAudioData(bytes.buffer);
+        const src = ttsCtx.createBufferSource();
+        src.buffer = buf;
+        src.connect(ttsDest);   // routes audio into the WebRTC sender track
+        src.start();
+    } catch (e) {
+        console.error('Grey Parrot: TTS decode failed', e);
+    }
+}
 
 // ── AudioContext + worklet setup ──────────────────────────────────
 // __gpWorkletUrl is set by content.js (chrome.runtime.getURL) before
@@ -119,6 +183,7 @@ window.addEventListener('message', async (event) => {
             await captureAudioStream(pendingStreams.agent, 'agent');
         }
 
+        await startTTSInjection();
     }
 
     if (event.data.type === 'STOP_TRANSLATION') {
@@ -128,6 +193,11 @@ window.addEventListener('message', async (event) => {
             source.disconnect();
         });
         processors = {};
+        await stopTTSInjection();
         console.log('Grey Parrot: Translation stopped');
+    }
+
+    if (event.data.type === 'TTS_AUDIO') {
+        await playTTSChunk(event.data.audio);
     }
 });

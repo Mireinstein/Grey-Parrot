@@ -1,8 +1,11 @@
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 import asyncio
+import base64
+import io
 from datetime import datetime
 from deep_translator import GoogleTranslator
+from gtts import gTTS
 from services.deepgram_streamer import DeepgramStreamer
 from config import Config
 
@@ -23,6 +26,23 @@ def translate_text(text: str, source: str, target: str) -> str:
     if source == target:
         return text
     return GoogleTranslator(source=source, target=target).translate(text)
+
+
+def _tts_sync(text: str, lang: str) -> str | None:
+    try:
+        tts = gTTS(text=text, lang=lang, slow=False)
+        buf = io.BytesIO()
+        tts.write_to_fp(buf)
+        buf.seek(0)
+        return base64.b64encode(buf.read()).decode('utf-8')
+    except Exception as e:
+        print(f"TTS failed ({lang}): {e}")
+        return None
+
+
+async def text_to_speech(text: str, lang: str) -> str | None:
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, lambda: _tts_sync(text, lang))
 
 
 @app.websocket("/ws/translate")
@@ -73,6 +93,11 @@ async def translate_websocket(websocket: WebSocket):
                         None, lambda: translate_text(text, _al, _cl)
                     )
                     print(f"agent   | {text!r} → {translated!r}")
+
+                    # Generate TTS so the customer hears the translated voice
+                    tts_audio = await text_to_speech(translated, _cl)
+                    if tts_audio:
+                        await websocket.send_json({'type': 'TTS_AUDIO', 'audio': tts_audio})
 
                     _tr.append({
                         'speaker': 'agent',
