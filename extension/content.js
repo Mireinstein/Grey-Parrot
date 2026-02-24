@@ -253,7 +253,8 @@ const SIDEBAR_TEMPLATE = `
   .gp-speaker.customer { color: #c0392b; }
   .gp-speaker.agent    { color: #0070c1; }
 
-  .gp-original-text { color: #333; font-size: 12px; }
+  .gp-translation { color: #1a7a3a; font-size: 12.5px; font-weight: 500; }
+  .gp-original    { color: #2563b0; font-size: 11.5px; font-style: italic; margin-top: 2px; }
 </style>
 
 <div id="wrapper">
@@ -424,13 +425,12 @@ function displayTranscript(shadow, transcript) {
     if (!el) return;
 
     el.innerHTML = transcript.map(entry => {
-        const isCustomer = entry.speaker === 'customer';
-        const label      = isCustomer ? 'Customer' : 'Agent';
-        const displayText = isCustomer ? entry.translation : entry.text;
-        return `
-        <div class="gp-entry">
+        const label    = entry.speaker === 'customer' ? 'Customer' : 'Agent';
+        const sameText = entry.text === entry.translation;
+        return `<div class="gp-entry">
             <span class="gp-speaker ${entry.speaker}">${label}:</span>
-            <span class="gp-original-text">${displayText}</span>
+            <span class="gp-translation"> ${entry.translation}</span>
+            ${!sameText ? `<div class="gp-original">${entry.text}</div>` : ''}
         </div>`;
     }).join('');
 
