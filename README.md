@@ -1,6 +1,6 @@
 # Grey Parrot
 
-Real-time bidirectional speech translation for contact center agents. Grey Parrot sits as a sidebar inside Amazon Connect's CCP, listens to both sides of the call, and shows the agent a live translated transcript — no headset splitters, no separate apps.
+Real-time bidirectional speech translation for contact centers. Grey Parrot sits as a sidebar inside Amazon Connect's CCP, listens to both sides of the call, and shows the agent a live translated transcript — no headset splitters, no separate apps.
 
 **How it works:**
 - The customer speaks (e.g. Spanish) -> agent hears it in their language e.g English
