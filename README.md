@@ -182,7 +182,7 @@ Grey-Parrot/
 | `ru` | Russian    |
 | `it` | Italian    |
 
----
+----
 
 ## Troubleshooting
 
