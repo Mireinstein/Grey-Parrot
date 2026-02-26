@@ -3,8 +3,8 @@
 Real-time bidirectional speech translation for contact center agents. Grey Parrot sits as a sidebar inside Amazon Connect's CCP, listens to both sides of the call, and shows the agent a live translated transcript — no headset splitters, no separate apps.
 
 **How it works:**
-- The customer speaks (e.g. Spanish) → Deepgram transcribes → Google Translate converts to English → agent reads it in the sidebar
-- The agent speaks (English) → Deepgram transcribes → agent sees their own words confirmed in the sidebar
+- The customer speaks (e.g. Spanish) -> agent hears it in their language e.g English
+- The agent speaks English →  customer hears Spanish
 
 ---
 
