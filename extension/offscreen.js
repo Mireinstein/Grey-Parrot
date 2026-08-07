@@ -1,26 +1,26 @@
 // Offscreen document — runs as a real extension page so getUserMedia with
 // chromeMediaSource:'tab' works without CSP or context restrictions.
 
-let audioCtx   = null;
-let processor  = null;
-let audioElem  = null;   // plays stream back so the agent can still hear the customer
+let audioCtx  = null;
+let processor = null;
+let audioElem = null;   // plays the stream back so the user still hears the video
 
 chrome.runtime.onMessage.addListener((message) => {
-    if (message.type === 'CAPTURE_CUSTOMER_AUDIO') {
+    if (message.type === 'CAPTURE_TAB_AUDIO') {
         captureAudio(message.tabAudioStreamId);
     }
-    if (message.type === 'STOP_CUSTOMER_AUDIO') {
+    if (message.type === 'STOP_TAB_AUDIO') {
         cleanup();
     }
 });
 
 // Signal background that our listener is registered and we're ready to
-// receive CAPTURE_CUSTOMER_AUDIO. This eliminates the race condition where
+// receive CAPTURE_TAB_AUDIO. This eliminates the race condition where
 // the background sent the message before this listener was set up.
 chrome.runtime.sendMessage({ type: 'OFFSCREEN_READY' });
 
 function sendChunk(pcm16) {
-    chrome.runtime.sendMessage({ type: 'CUSTOMER_AUDIO_CHUNK', audioData: Array.from(pcm16) });
+    chrome.runtime.sendMessage({ type: 'AUDIO_CHUNK', audioData: Array.from(pcm16) });
 }
 
 async function captureAudio(streamId) {
@@ -35,8 +35,8 @@ async function captureAudio(streamId) {
             video: false,
         });
 
-        // Play the captured stream back through the agent's speakers so they
-        // can still hear the customer while we also capture it for transcription.
+        // Play the captured stream back so the user still hears the video —
+        // tabCapture mutes the tab's normal output once captured.
         audioElem = new Audio();
         audioElem.srcObject = stream;
         audioElem.play();

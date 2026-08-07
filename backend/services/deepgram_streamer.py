@@ -24,7 +24,7 @@ class DeepgramStreamer:
         self._conn = client.listen.asyncwebsocket.v("1")
 
         options = LiveOptions(
-            model="nova-2",
+            model="nova-3",
             language=self._language,
             punctuate=True,
             interim_results=True,

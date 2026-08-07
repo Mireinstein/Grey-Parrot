@@ -130,48 +130,8 @@ button:disabled {
     cursor: not-allowed;
 }
 
-.transcript-section {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-.transcript-section label {
-    font-size: 12px;
-    font-weight: 600;
-    color: #555;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-}
-
-.transcript {
-    background: white;
-    border: 1px solid #e0e0e0;
-    border-radius: 6px;
-    padding: 10px;
-    height: 140px;
-    overflow-y: auto;
-    font-size: 13px;
-    color: #666;
+.hint {
+    font-size: 11.5px;
+    color: #888;
     line-height: 1.5;
-}
-
-.entry {
-    padding: 6px 0;
-    border-bottom: 1px solid #f0f0f0;
-}
-
-.entry:last-child {
-    border-bottom: none;
-}
-
-.entry strong {
-    color: #333;
-    text-transform: capitalize;
-}
-
-.entry em {
-    color: #4a90e2;
-    font-style: normal;
-    font-size: 12px;
 }

@@ -1,10 +1,18 @@
 # Grey Parrot
 
-Real-time bidirectional speech translation for contact centers. Grey Parrot sits as a sidebar inside Amazon Connect's CCP, listens to both sides of the call, and shows the agent a live translated transcript — no headset splitters, no separate apps.
+A Chrome extension that puts live, translated subtitles on any video —
+YouTube, TikTok, or anything else playing in a browser tab. No captions
+required from the source; Grey Parrot listens to the tab's audio, transcribes
+it, translates it, and overlays it on the page in real time.
 
 **How it works:**
-- The customer speaks (e.g. Spanish) -> agent hears it in their language e.g English
-- The agent speaks English →  customer hears Spanish
+- Speech-to-text (STT) on whatever's playing in the tab, spoken language
+  auto-detected
+- Text-to-text (TTT) translation into your chosen subtitle language
+- Result rendered as a live caption bar over the page
+
+There's no text-to-speech and no bidirectional audio — it's a one-way
+subtitle overlay, not a call-translation tool.
 
 ---
 
@@ -12,7 +20,6 @@ Real-time bidirectional speech translation for contact centers. Grey Parrot sits
 
 - **Python 3.10+**
 - **Google Chrome**
-- **Amazon Connect instance** with an agent account (you'll use the CCP softphone at `https://<your-instance>.my.connect.aws/ccp-v2/`)
 - **Deepgram API key** — free $200 credit at [console.deepgram.com](https://console.deepgram.com/)
 
 ---
@@ -59,7 +66,8 @@ curl http://localhost:8000/health
 # {"status":"ok","active_sessions":0}
 ```
 
-Leave this terminal open — the backend must stay running during calls.
+Leave this terminal open — the backend must stay running while you use the
+extension.
 
 ### 5. Load the Chrome extension
 
@@ -71,91 +79,84 @@ Leave this terminal open — the backend must stay running during calls.
 
 ---
 
-## Using Grey Parrot on a Call
+## Using it
 
-1. **Navigate to your Amazon Connect CCP**
-   `https://<your-instance>.my.connect.aws/ccp-v2/`
-   The Grey Parrot sidebar opens automatically on the right side of the page.
-
-2. **Select languages in the sidebar**
-   - *Customer Language* — the language the customer is calling in (e.g. Spanish)
-   - *Agent Language* — the language the agent speaks (e.g. English)
-
-3. **Click "Start Translation"**
-   The status pill turns green and shows *Translation Active*.
-
-4. **Accept a call in the CCP softphone**
-   As soon as audio flows, Grey Parrot begins transcribing both sides:
-   - **Customer:** shows the English translation of what the customer said
-   - **Agent:** shows a confirmation of what the agent said
-
-5. **End the session**
-   Click **Stop Translation** when the call ends. The transcript stays visible until the next session starts.
-
-> **Tip:** The sidebar can be resized by dragging the left edge. It can be hidden/shown by clicking the Grey Parrot toolbar icon.
+1. Open a video — a YouTube video, a TikTok, anything playing audio in a tab.
+2. Click the Grey Parrot toolbar icon.
+3. Pick your **subtitle language** from the dropdown.
+4. Click **Start subtitles**.
+5. A caption bar appears near the bottom of the page and updates live as the
+   video plays. Audio keeps playing normally — Grey Parrot captures the tab's
+   audio in parallel, it doesn't interrupt playback.
+6. Click **Stop** in the popup when you're done.
 
 ---
 
 ## Architecture
 
 ```
-Amazon Connect CCP (browser tab)
-  ├── content.js        Content script — injects sidebar UI and bridges messages
-  ├── inject.js         Page-context script — hooks getUserMedia + RTCPeerConnection
-  │                     to capture raw 16 kHz PCM from both audio streams
-  └── pcm-processor.js  AudioWorklet — converts float32 samples to int16 PCM
+Popup (toolbar icon)
+  └── popup.js          Start/Stop UI, subtitle-language picker
 
-Chrome Extension Background
-  └── background.js     Maintains WebSocket connection to backend;
-                        forwards audio chunks and receives transcript updates
+Background service worker
+  └── background.js     Orchestrates everything: injects content.js into the
+                        active tab, starts tabCapture + the offscreen
+                        document, opens the WebSocket to the backend, relays
+                        captions to the tab
+
+Offscreen document (required for tab audio capture in MV3)
+  └── offscreen.js       getUserMedia({chromeMediaSource:'tab'}) → AudioWorklet
+                        → 16 kHz int16 PCM chunks. Also plays the captured
+                        stream back so audio keeps working normally.
+  └── pcm-processor.js   AudioWorklet — float32 samples → int16 PCM
+
+Content script (injected on demand, not statically on every page)
+  └── content.js         Renders the caption overlay (Shadow DOM)
 
 Backend (FastAPI + uvicorn)
   └── main.py                  WebSocket server — orchestrates the pipeline
   └── services/
-      └── deepgram_streamer.py Streams PCM to Deepgram Live API (nova-2 model)
-                               Fires callback on speech_final utterances
-  └── config.py                Reads .env (DEEPGRAM_API_KEY, host, port)
+      └── deepgram_streamer.py Streams PCM to Deepgram Live API
+                               (nova-3, language="multi" — auto-detects/
+                               code-switches the spoken language)
 
 Translation
-  └── deep-translator (GoogleTranslator) — free, no API key required
+  └── deep-translator (GoogleTranslator, source="auto") — free, no API key
 ```
 
 **Data flow per utterance:**
 
 ```
-Microphone / WebRTC track
-  → inject.js (AudioWorklet, 16 kHz int16 PCM)
-  → content.js (window.postMessage)
-  → background.js (chrome.runtime.sendMessage → WebSocket)
+Tab audio (chrome.tabCapture)
+  → offscreen.js (AudioWorklet, 16 kHz int16 PCM)
+  → background.js (WebSocket)
   → backend main.py (AUDIO_CHUNK)
   → DeepgramStreamer.send()
-  → Deepgram Live API (nova-2, speech_final)
-  → GoogleTranslator
-  → WebSocket TRANSCRIPT message
-  → background.js → chrome.storage.local
-  → content.js (storage.onChanged)
-  → sidebar displayTranscript()
+  → Deepgram Live API (nova-3, language=multi, speech_final)
+  → GoogleTranslator (source=auto, target=<your language>)
+  → WebSocket CAPTION message
+  → background.js → chrome.tabs.sendMessage
+  → content.js → caption overlay updates
 ```
 
 ---
 
-## File Structure
+## File structure
 
 ```
 Grey-Parrot/
 ├── extension/
-│   ├── manifest.json       MV3 manifest — permissions, content script rules
-│   ├── background.js       Service worker — WebSocket client, message routing
-│   ├── content.js          Content script — sidebar UI (Shadow DOM), audio bridge
-│   ├── inject.js           Page-context script — WebRTC hooks, AudioWorklet
-│   ├── pcm-processor.js    AudioWorklet processor — float32 → int16 PCM
+│   ├── manifest.json       MV3 manifest — permissions, action popup
+│   ├── background.js       Service worker — orchestration, WebSocket client
+│   ├── offscreen.js         Tab-audio capture (getUserMedia + AudioWorklet)
+│   ├── offscreen.html
+│   ├── content.js            Caption overlay (Shadow DOM), injected on demand
+│   ├── popup.html / popup.js Start/Stop UI, language picker
+│   ├── pcm-processor.js      AudioWorklet processor — float32 → int16 PCM
 │   └── icons/
-│       ├── icon-16.png
-│       ├── icon-48.png
-│       └── icon-128.png
 ├── backend/
-│   ├── main.py             FastAPI WebSocket server
-│   ├── config.py           Environment config
+│   ├── main.py              FastAPI WebSocket server
+│   ├── config.py            Environment config
 │   ├── requirements.txt
 │   └── services/
 │       └── deepgram_streamer.py  Deepgram Live streaming client
@@ -165,39 +166,36 @@ Grey-Parrot/
 
 ---
 
-## Supported Languages
+## Supported languages
 
-| Code | Language   |
-|------|------------|
-| `en` | English    |
-| `es` | Spanish    |
-| `fr` | French     |
-| `pt` | Portuguese |
-| `de` | German     |
-| `zh` | Chinese    |
-| `ar` | Arabic     |
-| `ja` | Japanese   |
-| `ko` | Korean     |
-| `hi` | Hindi      |
-| `ru` | Russian    |
-| `it` | Italian    |
+**Spoken-language detection** (Deepgram nova-3, `language=multi`) currently
+code-switches across: English, Spanish, French, German, Hindi, Russian,
+Portuguese, Japanese, Italian, Dutch. ([Deepgram docs](https://developers.deepgram.com/docs/multilingual-code-switching))
 
-----
+**Subtitle/target language** is whatever you pick in the popup — translation
+goes through Google Translate, which covers a much wider set than the
+detection list above.
+
+---
 
 ## Troubleshooting
 
-**Sidebar doesn't open**
-- Make sure the extension is loaded and enabled in `chrome://extensions/`
-- The content script only runs on `*.my.connect.aws/ccp-v2/*` — confirm your CCP URL matches that pattern
-
-**"Translation Inactive" stays grey after clicking Start**
+**Nothing happens when I click "Start subtitles"**
 - Check the backend is running: `curl http://localhost:8000/health`
-- Open Chrome DevTools on the CCP tab → Console — look for WebSocket errors from Grey Parrot
+- Open `chrome://extensions/` → Grey Parrot → *service worker* console and
+  look for errors from `tabCapture.getMediaStreamId`
 
-**No transcript appears during a call**
-- Open the extension's background service worker console (`chrome://extensions/` → Grey Parrot → *Service Worker*) and check for errors
-- In the CCP tab console, look for `Grey Parrot: AudioWorkletNode active` or `falling back to ScriptProcessorNode` — either is fine
-- Confirm audio is flowing: the Deepgram streamer connects lazily on the first audio chunk, so silence will produce nothing
+**Caption bar never appears**
+- Open the offscreen document's console (`chrome://extensions/` → Grey
+  Parrot → inspect views → `offscreen.html`) and check for `getUserMedia`
+  errors
+- Confirm the tab actually has audio playing — silence produces no captions
+
+**Audio goes silent after clicking Start**
+- This shouldn't happen — `offscreen.js` plays the captured stream back
+  through an `<audio>` element specifically to avoid this. If it does,
+  check the offscreen console for playback errors.
 
 **`DEEPGRAM_API_KEY` error on backend start**
-- Ensure `backend/.env` exists and contains a valid key (not the placeholder from `.env.example`)
+- Ensure `backend/.env` exists and contains a valid key (not the placeholder
+  from `.env.example`)

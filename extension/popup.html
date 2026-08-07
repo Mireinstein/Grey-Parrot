@@ -11,37 +11,34 @@
             <span class="logo">🦜</span>
             <div>
                 <h1>Grey Parrot</h1>
-                <p>Real-Time Translation</p>
+                <p>Live subtitles, translated</p>
             </div>
         </div>
 
-        <div id="status" class="status inactive">Translation Inactive</div>
+        <div id="status" class="status inactive">Not running</div>
 
         <div class="controls">
-            <label>Customer Language</label>
-            <select id="customerLang">
-                <option value="es" selected>Spanish</option>
-                <option value="en">English</option>
-                <option value="fr">French</option>
-            </select>
-
-            <label>Agent Language</label>
-            <select id="agentLang">
+            <label for="targetLang">Subtitle language</label>
+            <select id="targetLang">
                 <option value="en" selected>English</option>
                 <option value="es">Spanish</option>
                 <option value="fr">French</option>
+                <option value="pt">Portuguese</option>
+                <option value="de">German</option>
+                <option value="zh">Chinese</option>
+                <option value="ar">Arabic</option>
+                <option value="ja">Japanese</option>
+                <option value="ko">Korean</option>
+                <option value="hi">Hindi</option>
+                <option value="ru">Russian</option>
+                <option value="it">Italian</option>
             </select>
 
-            <button id="startBtn" class="btn-primary">Start Translation</button>
+            <button id="startBtn" class="btn-primary">Start subtitles</button>
             <button id="stopBtn" class="btn-secondary" disabled>Stop</button>
         </div>
 
-        <div class="transcript-section">
-            <label>Live Transcript</label>
-            <div id="transcript" class="transcript">
-                No active session
-            </div>
-        </div>
+        <p class="hint">Works on any tab with video/audio playing — YouTube, TikTok, etc. The video's spoken language is detected automatically.</p>
     </div>
 
     <script src="popup.js"></script>

@@ -1,34 +1,19 @@
 {
   "manifest_version": 3,
-  "name": "Grey Parrot - Real-time bidirectional translation for contact centers",
-  "version": "1.0.0",
-  "description": "Real-time bidirectional translation for contact centers",
-  "permissions": ["activeTab", "storage", "tabs", "tabCapture", "offscreen"],
-  "host_permissions": ["*://*.my.connect.aws/*", "http://localhost:8000/*"],
+  "name": "Grey Parrot - Live Video Subtitles, Translated",
+  "version": "2.0.0",
+  "description": "Watch any video in any language and get live subtitles in your own.",
+  "permissions": ["activeTab", "storage", "tabCapture", "offscreen", "scripting"],
+  "host_permissions": ["http://localhost:8000/*"],
   "background": {
     "service_worker": "background.js"
   },
-  "content_scripts": [
-    {
-      "matches": [
-        "*://*.my.connect.aws/*"
-      ],
-      "js": ["content.js"],
-      "run_at": "document_start",
-      "all_frames": true
-    }
-  ],
   "action": {
+    "default_popup": "popup.html",
     "default_icon": {
       "16": "icons/icon-16.png",
       "48": "icons/icon-48.png",
       "128": "icons/icon-128.png"
     }
-  },
-  "web_accessible_resources": [
-    {
-      "resources": ["inject.js", "pcm-processor.js", "icons/icon-48.png"],
-      "matches": ["*://*/*"]
-    }
-  ]
+  }
 }
