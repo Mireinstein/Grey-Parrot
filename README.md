@@ -11,9 +11,6 @@ it, translates it, and overlays it on the page in real time.
 - Text-to-text (TTT) translation into your chosen subtitle language
 - Result rendered as a live caption bar over the page
 
-There's no text-to-speech and no bidirectional audio — it's a one-way
-subtitle overlay, not a call-translation tool.
-
 ---
 
 ## Prerequisites
